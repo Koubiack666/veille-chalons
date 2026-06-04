@@ -154,7 +154,7 @@ def send_to_discord(title, articles):
             }
         ],
         "footer": {
-            "text": f"Veille • {datetime.now(ZoneInfo("Europe/Paris")).strftime('%d/%m %H:%M')}"
+            "text": f"Veille • {datetime.now(ZoneInfo('Europe/Paris')).strftime('%d/%m %H:%M')}"
         }
     }
 
