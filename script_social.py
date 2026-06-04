@@ -6,17 +6,26 @@ import json
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_SOCIAL")
 
-# ✅ flux sociaux
 RSS_FEEDS = [
-
-    # X / Twitter via Nitter
     "https://nitter.net/chalonsagglo/rss",
-
-    # YouTube (remplace ID par la vraie chaîne)
-    "https://www.youtube.com/feeds/videos.xml?channel_id=chalonsagglo"
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCXXXXXXXXXXXX"
 ]
 
 SEEN_FILE = "seen_social.json"
+
+IMPORTANT_KEYWORDS = [
+    "projet", "lancement", "inauguration",
+    "nouveau", "événement", "ouverture"
+]
+
+ALERT_KEYWORDS = [
+    "incident", "problème", "fermeture",
+    "alerte", "annulation", "urgence"
+]
+
+EXCLUDED_KEYWORDS = [
+    "jeu", "concours"
+]
 
 # ✅ charger historique
 try:
@@ -26,19 +35,38 @@ except:
     seen_urls = set()
 
 
-# ✅ nettoyage texte
 def clean_text(text):
     return text.replace("\n", " ").strip()
 
 
-# ✅ envoi discord
+def contains_keywords(text, keywords):
+    text = text.lower()
+    return any(word in text for word in keywords)
+
+
+# ✅ envoi discord amélioré
 def send_to_discord(title, link, source):
+
+    text = title.lower()
+
+    # 🚨 priorité
+    if contains_keywords(text, ALERT_KEYWORDS):
+        tag = "🚨 ALERTE"
+        color = 15158332
+
+    elif contains_keywords(text, IMPORTANT_KEYWORDS):
+        tag = "⭐ IMPORTANT"
+        color = 15844367
+
+    else:
+        tag = "📢 INFORMATION"
+        color = 3447003
 
     embed = {
         "title": title,
         "url": link,
-        "description": f"📱 Source : {source}",
-        "color": 3447003,
+        "description": f"{tag}\n📱 Source : {source}",
+        "color": color,
         "footer": {
             "text": f"Veille Réseaux • {datetime.now().strftime('%d/%m %H:%M')}"
         }
@@ -57,14 +85,17 @@ for feed_url in RSS_FEEDS:
     for entry in feed.entries:
 
         link = entry.get("link", "")
+        title = clean_text(entry.get("title", ""))
 
-        # ✅ anti-doublon strict
+        # ✅ filtre bruit
+        if contains_keywords(title, EXCLUDED_KEYWORDS):
+            continue
+
+        # ✅ anti-doublon
         if link in seen_urls:
             continue
 
-        title = clean_text(entry.get("title", "Sans titre"))
-
-        # ✅ identifier source
+        # source
         if "nitter" in feed_url:
             source = "X / Twitter"
         elif "youtube" in feed_url:
@@ -72,14 +103,13 @@ for feed_url in RSS_FEEDS:
         else:
             source = "Réseau"
 
-        # ✅ envoi
         send_to_discord(title, link, source)
 
         seen_urls.add(link)
         sent_something = True
 
 
-# ✅ fallback si aucun post
+# ✅ fallback
 if not sent_something:
     requests.post(
         WEBHOOK_URL,
@@ -87,6 +117,8 @@ if not sent_something:
             "content": f"✅ Veille sociale OK — aucun nouveau post ({datetime.now().strftime('%H:%M')})"
         }
     )
+
+
 # ✅ sauvegarde
 with open(SEEN_FILE, "w") as f:
     json.dump(list(seen_urls), f)
