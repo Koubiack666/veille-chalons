@@ -2,8 +2,12 @@ name: Veille Châlons
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
+  
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 
 jobs:
   run-script:
