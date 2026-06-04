@@ -10,7 +10,7 @@ import urllib.parse
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# ✅ SOURCES RSS OPTIMISÉES
+# ✅ SOURCES RSS
 RSS_FEEDS = [
 
     # Google News ciblé
@@ -42,20 +42,31 @@ except:
     seen_topics = {}
     seen_urls = set()
 
-# ✅ nettoyage titre
+# ✅ Nettoyage titre
 def clean_title(title):
     return re.sub(r'[^\w\s]', '', title.lower())
 
-# ✅ filtre aujourd’hui
+# ✅ Heure Paris
+def now_paris():
+    return datetime.now(ZoneInfo('Europe/Paris'))
+
+# ✅ Filtre aujourd’hui
 def is_today(entry):
 
     if hasattr(entry, "published_parsed"):
+
         d = datetime(*entry.published_parsed[:6])
-        return d.date() == datetime.now(ZoneInfo("Europe/Paris")).date()
+        now = now_paris()
+
+        return (
+            d.year == now.year and
+            d.month == now.month and
+            d.day == now.day
+        )
 
     return True
 
-# ✅ filtre territorial
+# ✅ Filtrage contenu
 def is_valid_article(entry):
 
     text = (
@@ -69,7 +80,7 @@ def is_valid_article(entry):
 
     return True
 
-# ✅ vraie URL
+# ✅ Vraie URL
 def get_real_url(entry):
 
     link = entry.get("link", "")
@@ -85,7 +96,7 @@ def get_real_url(entry):
 
     return link
 
-# ✅ source propre
+# ✅ Source propre
 def extract_real_source(entry):
 
     title = entry.get("title", "")
@@ -102,14 +113,13 @@ def extract_real_source(entry):
 
     return "source"
 
-# ✅ envoi Discord
+# ✅ Envoi Discord
 def send_to_discord(title, articles):
 
     nb = len(articles)
     main = articles[0]
     main_link = get_real_url(main)
 
-    # sources sans doublon
     seen_domains = set()
     sources = []
 
@@ -154,14 +164,14 @@ def send_to_discord(title, articles):
             }
         ],
         "footer": {
-            "text": f"Veille • {datetime.now(ZoneInfo('Europe/Paris')).strftime('%d/%m %H:%M')}"
+            "text": f"Veille • {now_paris().strftime('%d/%m %H:%M')}"
         }
     }
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
 
-# ✅ AGRÉGATION + FILTRAGE
+# ✅ AGRÉGATION
 clusters = defaultdict(list)
 cluster_urls = defaultdict(set)
 
@@ -170,17 +180,14 @@ for feed_url in RSS_FEEDS:
 
     for entry in feed.entries:
 
-        # filtre date
         if not is_today(entry):
             continue
 
-        # filtre territoire / bruit
         if not is_valid_article(entry):
             continue
 
         real_url = get_real_url(entry)
 
-        # ✅ éviter doublon article strict
         if real_url in seen_urls:
             continue
 
@@ -197,7 +204,6 @@ for key, articles in clusters.items():
     nb = len(articles)
     main = articles[0]
 
-    # nouveau sujet
     if key not in seen_topics:
         send_to_discord(main.get("title", ""), articles)
         seen_topics[key] = nb
@@ -205,7 +211,6 @@ for key, articles in clusters.items():
         sent_something = True
 
     else:
-        # mise à jour (sujet grossit)
         if nb > seen_topics[key] + 2:
             send_to_discord("🔄 Mise à jour : " + main.get("title", ""), articles)
             seen_topics[key] = nb
@@ -217,7 +222,7 @@ if not sent_something:
     requests.post(
         WEBHOOK_URL,
         json={
-            "content": f"✅ Veille OK — aucun nouvel article ({datetime.now(ZoneInfo("Europe/Paris")).strftime('%H:%M')})"
+            "content": f"✅ Veille OK — aucun nouvel article ({now_paris().strftime('%H:%M')})"
         }
     )
 
