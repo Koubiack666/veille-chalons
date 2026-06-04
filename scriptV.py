@@ -10,15 +10,19 @@ import urllib.parse
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# MULTI SOURCES
+# ✅ FLUX CIBLÉ AGGLO
 RSS_FEEDS = [
-    "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22+OR+%22Ch%C3%A2lons+Agglo%22+OR+%22Communaut%C3%A9+d%27agglom%C3%A9ration+de+Ch%C3%A2lons%22+OR+%22Benoist+Apparu%22+OR+%22Jacques+Jesson%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
+    "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+Fagni%C3%A8res+OR+Sarry+OR+Saint-Memmie+OR+Compertrix+OR+%22Saint-Martin-sur-le-Pr%C3%A9%22+OR+Recy+OR+J%C3%A2lons+OR+Juvigny+OR+%22Mourmelon-le-Grand%22+OR+%22Mourmelon-le-Petit%22+OR+Vatry+OR+Bussy-Lettr%C3%A9e+OR+Sommesous+OR+Coolus+OR+Matougues+OR+%22La+Veuve%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
+
     "https://www.lunion.fr/rss.xml",
     "https://www.francebleu.fr/rss/champagne-ardenne",
     "https://france3-regions.francetvinfo.fr/rss/champagne-ardenne.xml"
 ]
 
 SEEN_FILE = "seen.json"
+
+# ✅ mots interdits (filtrage dur)
+EXCLUDED_KEYWORDS = ["reims", "troyes", "epernay"]
 
 # Charger historique
 try:
@@ -27,11 +31,24 @@ try:
 except:
     seen = {}
 
-# Nettoyage titre
 def clean_title(title):
     return re.sub(r'[^\w\s]', '', title.lower())
 
-# ✅ récupérer vraie URL (très important)
+# ✅ filtrage territorial final
+def is_valid_article(entry):
+
+    text = (
+        entry.get("title", "") +
+        entry.get("summary", "")
+    ).lower()
+
+    for word in EXCLUDED_KEYWORDS:
+        if word in text:
+            return False
+
+    return True
+
+# ✅ vraie URL
 def get_real_url(entry):
     link = entry.get("link", "")
 
@@ -46,19 +63,16 @@ def get_real_url(entry):
 
     return link
 
-# ✅ extraction image correcte
+# ✅ extraction image réelle
 def extract_image(entry):
-
     real_url = get_real_url(entry)
 
-    # 1. Open Graph (priorité)
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(real_url, headers=headers, timeout=5)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, "html.parser")
-
             tag = soup.find("meta", property="og:image")
 
             if tag and tag.get("content"):
@@ -66,62 +80,39 @@ def extract_image(entry):
     except:
         pass
 
-    # 2. fallback RSS
-    if "media_content" in entry:
-        try:
-            return entry.media_content[0].get("url")
-        except:
-            pass
-
-    # 3. fallback summary
-    if "summary" in entry:
-        match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
-        if match:
-            return match.group(1)
-
     return None
 
-# Extraction source
+# ✅ source propre
 def extract_real_source(entry):
     title = entry.get("title", "")
     parts = title.split(" - ")
 
     for part in reversed(parts):
-        part = part.strip().lower()
-        if "." in part and len(part) < 40:
-            return part
+        if "." in part:
+            return part.strip().lower()
 
     link = get_real_url(entry)
-    if "://" in link:
-        return link.split("/")[2].replace("www.", "")
+    return link.split("/")[2].replace("www.", "")
 
-    return "source"
-
-# Envoi Discord
+# ✅ Discord
 def send_to_discord(title, articles, image_url):
 
     nb = len(articles)
     main = articles[0]
-
     main_link = get_real_url(main)
 
-    # éviter doublon médias
     seen_domains = set()
-    source_lines = []
+    sources = []
 
     for art in articles:
         domain = extract_real_source(art)
 
         if domain not in seen_domains:
-            source_lines.append(f"• {domain}")
+            sources.append(f"• {domain}")
             seen_domains.add(domain)
 
-        if len(source_lines) >= 10:
-            break
+    sources_text = "\n".join(sources)
 
-    sources_display = "\n".join(source_lines)
-
-    # importance
     if nb >= 10:
         niveau = "🔥 Sujet majeur"
         color = 15158332
@@ -145,7 +136,7 @@ def send_to_discord(title, articles, image_url):
             },
             {
                 "name": "📰 Sources",
-                "value": sources_display if sources_display else "Aucune source",
+                "value": sources_text,
                 "inline": False
             }
         ],
@@ -159,44 +150,38 @@ def send_to_discord(title, articles, image_url):
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
-# AGRÉGATION
+
+# ✅ AGGREGATION + FILTRAGE
 clusters = defaultdict(list)
 
 for feed_url in RSS_FEEDS:
     feed = feedparser.parse(feed_url)
 
     for entry in feed.entries:
-        title = entry.get("title", "")
-        key = clean_title(title)[:80]
+
+        if not is_valid_article(entry):
+            continue
+
+        key = clean_title(entry.get("title", ""))[:80]
         clusters[key].append(entry)
 
-# TRAITEMENT
+# ✅ TRAITEMENT
 for key, articles in clusters.items():
 
     nb = len(articles)
     main = articles[0]
-
-    image_url = extract_image(main)
+    image = extract_image(main)
 
     if key not in seen:
-        send_to_discord(
-            title=main.get("title", "Sans titre"),
-            articles=articles,
-            image_url=image_url
-        )
+        send_to_discord(main.get("title", ""), articles, image)
         seen[key] = nb
 
     else:
-        old_nb = seen[key]
-
-        if nb > old_nb + 2:
-            send_to_discord(
-                title="🔄 Mise à jour : " + main.get("title", ""),
-                articles=articles,
-                image_url=image_url
-            )
+        if nb > seen[key] + 2:
+            send_to_discord("🔄 Mise à jour : " + main.get("title", ""), articles, image)
             seen[key] = nb
 
-# Sauvegarde
+# ✅ sauvegarde
 with open(SEEN_FILE, "w") as f:
     json.dump(seen, f)
+``
