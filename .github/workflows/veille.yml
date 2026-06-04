@@ -2,7 +2,7 @@ name: Veille Châlons
 
 on:
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "* * * * *"
   workflow_dispatch:
 
 jobs:
