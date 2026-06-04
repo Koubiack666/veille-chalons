@@ -3,6 +3,7 @@ import requests
 from collections import defaultdict
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 import json
 import urllib.parse
@@ -50,7 +51,7 @@ def is_today(entry):
 
     if hasattr(entry, "published_parsed"):
         d = datetime(*entry.published_parsed[:6])
-        return d.date() == datetime.now().date()
+        return d.date() == datetime.now(ZoneInfo("Europe/Paris")).date()
 
     return True
 
@@ -153,7 +154,7 @@ def send_to_discord(title, articles):
             }
         ],
         "footer": {
-            "text": f"Veille • {datetime.now().strftime('%d/%m %H:%M')}"
+            "text": f"Veille • {datetime.now(ZoneInfo("Europe/Paris")).strftime('%d/%m %H:%M')}"
         }
     }
 
@@ -216,7 +217,7 @@ if not sent_something:
     requests.post(
         WEBHOOK_URL,
         json={
-            "content": f"✅ Veille OK — aucun nouvel article ({datetime.now().strftime('%H:%M')})"
+            "content": f"✅ Veille OK — aucun nouvel article ({datetime.now(ZoneInfo("Europe/Paris")).strftime('%H:%M')})"
         }
     )
 
