@@ -2,7 +2,7 @@ name: Veille Châlons
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -10,8 +10,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Récupérer le dépôt
         uses: actions/checkout@v4
+
+      - name: Config Git
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@example.com"
 
       - name: Installer Python
         uses: actions/setup-python@v5
@@ -21,7 +26,20 @@ jobs:
       - name: Installer dépendances
         run: pip install -r requirements.txt
 
+      # ✅ récupérer l’historique (anti-spam)
+      - name: Récupérer seen.json
+        run: |
+          git pull || echo "Pas encore d'historique"
+
+      # ✅ exécuter le script avec le secret
       - name: Lancer script
         run: python scriptV.py
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+
+      # ✅ sauvegarder l’historique
+      - name: Sauvegarder seen.json
+        run: |
+          git add seen.json
+          git commit -m "update seen" || echo "No changes"
+          git push
