@@ -6,13 +6,19 @@ import json
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_SOCIAL")
 
+# ✅ FLUX SOCIAUX
 RSS_FEEDS = [
+
+    # X / Twitter via Nitter
     "https://nitter.net/chalonsagglo/rss",
-    "https://www.youtube.com/feeds/videos.xml?search_query=chalons+agglo+OR+chalons+champagne+OR+chalo"
+
+    # ✅ YouTube recherche globale
+    "https://www.youtube.com/feeds/videos.xml?search_query=chalons+agglo+OR+chalons+champagne+OR+chalons"
 ]
 
 SEEN_FILE = "seen_social.json"
 
+# ✅ Mots clés
 IMPORTANT_KEYWORDS = [
     "projet", "lancement", "inauguration",
     "nouveau", "événement", "ouverture"
@@ -27,7 +33,7 @@ EXCLUDED_KEYWORDS = [
     "jeu", "concours"
 ]
 
-# ✅ charger historique
+# ✅ Charger historique
 try:
     with open(SEEN_FILE, "r") as f:
         seen_urls = set(json.load(f))
@@ -35,16 +41,35 @@ except:
     seen_urls = set()
 
 
+# ✅ Nettoyage texte
 def clean_text(text):
     return text.replace("\n", " ").strip()
 
 
+# ✅ Détection mots-clés
 def contains_keywords(text, keywords):
     text = text.lower()
     return any(word in text for word in keywords)
 
 
-# ✅ envoi discord amélioré
+# ✅ Filtre aujourd’hui
+def is_today(entry):
+
+    if hasattr(entry, "published_parsed"):
+
+        d = datetime(*entry.published_parsed[:6])
+        now = datetime.now()
+
+        return (
+            d.year == now.year and
+            d.month == now.month and
+            d.day == now.day
+        )
+
+    return False
+
+
+# ✅ Envoi Discord
 def send_to_discord(title, link, source):
 
     text = title.lower()
@@ -75,7 +100,7 @@ def send_to_discord(title, link, source):
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
 
-# ✅ traitement
+# ✅ TRAITEMENT
 sent_something = False
 
 for feed_url in RSS_FEEDS:
@@ -84,8 +109,12 @@ for feed_url in RSS_FEEDS:
 
     for entry in feed.entries:
 
-        link = entry.get("link", "")
         title = clean_text(entry.get("title", ""))
+        link = entry.get("link", "")
+
+        # ✅ filtre aujourd’hui
+        if not is_today(entry):
+            continue
 
         # ✅ filtre bruit
         if contains_keywords(title, EXCLUDED_KEYWORDS):
@@ -95,21 +124,22 @@ for feed_url in RSS_FEEDS:
         if link in seen_urls:
             continue
 
-        # source
+        # ✅ source
         if "nitter" in feed_url:
             source = "X / Twitter"
         elif "youtube" in feed_url:
             source = "YouTube"
         else:
-            source = "Réseau"
+            source = "Réseaux"
 
+        # ✅ envoi
         send_to_discord(title, link, source)
 
         seen_urls.add(link)
         sent_something = True
 
 
-# ✅ fallback
+# ✅ fallback si rien
 if not sent_something:
     requests.post(
         WEBHOOK_URL,
