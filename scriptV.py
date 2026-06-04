@@ -14,38 +14,31 @@ RSS_FEEDS = [
 ]
 
 SEEN_FILE = "seen.json"
+
 EXCLUDED_KEYWORDS = ["reims", "troyes", "epernay"]
 
-# Charger historique
+# ✅ structure mémoire améliorée
 try:
     with open(SEEN_FILE, "r") as f:
-        seen = json.load(f)
+        data = json.load(f)
+        seen_topics = data.get("topics", {})
+        seen_urls = set(data.get("urls", []))
 except:
-    seen = {}
+    seen_topics = {}
+    seen_urls = set()
 
 def clean_title(title):
     return re.sub(r'[^\w\s]', '', title.lower())
 
 def is_today(entry):
-
     if hasattr(entry, "published_parsed"):
         d = datetime(*entry.published_parsed[:6])
         now = datetime.now()
-
-        return (
-            d.year == now.year and
-            d.month == now.month and
-            d.day == now.day
-        )
-
+        return d.date() == now.date()
     return True
 
 def is_valid_article(entry):
-
-    text = (
-        entry.get("title", "") +
-        entry.get("summary", "")
-    ).lower()
+    text = (entry.get("title", "") + entry.get("summary", "")).lower()
 
     for word in EXCLUDED_KEYWORDS:
         if word in text:
@@ -53,8 +46,8 @@ def is_valid_article(entry):
 
     return True
 
+# ✅ vraie URL
 def get_real_url(entry):
-
     link = entry.get("link", "")
 
     try:
@@ -74,8 +67,9 @@ def extract_real_source(entry):
     parts = title.split(" - ")
 
     for part in reversed(parts):
+        part = part.strip().lower()
         if "." in part:
-            return part.strip().lower()
+            return part
 
     link = get_real_url(entry)
     return link.split("/")[2].replace("www.", "")
@@ -118,15 +112,16 @@ def send_to_discord(title, articles):
             {"name": "📰 Sources", "value": sources_text, "inline": False}
         ],
         "footer": {
-            "text": f"Veille OK • {datetime.now().strftime('%d/%m %H:%M')}"
+            "text": f"Veille • {datetime.now().strftime('%d/%m %H:%M')}"
         }
     }
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
 
-# --- EXÉCUTION ---
+# ✅ AGRÉGATION
 clusters = defaultdict(list)
+cluster_urls = defaultdict(set)
 
 for feed_url in RSS_FEEDS:
     feed = feedparser.parse(feed_url)
@@ -139,10 +134,18 @@ for feed_url in RSS_FEEDS:
         if not is_valid_article(entry):
             continue
 
+        real_url = get_real_url(entry)
+
+        # ✅ BLOQUE doublon d'article
+        if real_url in seen_urls:
+            continue
+
         key = clean_title(entry.get("title", ""))[:80]
+
         clusters[key].append(entry)
+        cluster_urls[key].add(real_url)
 
-
+# ✅ TRAITEMENT
 sent_something = False
 
 for key, articles in clusters.items():
@@ -150,25 +153,31 @@ for key, articles in clusters.items():
     nb = len(articles)
     main = articles[0]
 
-    if key not in seen:
+    # ✅ nouveau sujet
+    if key not in seen_topics:
         send_to_discord(main.get("title", ""), articles)
-        seen[key] = nb
+        seen_topics[key] = nb
+        seen_urls.update(cluster_urls[key])
         sent_something = True
 
     else:
-        if nb > seen[key] + 2:
+        # ✅ évolution du sujet
+        if nb > seen_topics[key] + 2:
             send_to_discord("🔄 Mise à jour : " + main.get("title", ""), articles)
-            seen[key] = nb
+            seen_topics[key] = nb
+            seen_urls.update(cluster_urls[key])
             sent_something = True
 
-
-# ✅ message si rien
+# ✅ fallback
 if not sent_something:
     requests.post(
         WEBHOOK_URL,
         json={"content": f"✅ Veille OK — aucun nouvel article ({datetime.now().strftime('%H:%M')})"}
     )
 
-# ✅ sauvegarde
+# ✅ sauvegarde robuste
 with open(SEEN_FILE, "w") as f:
-    json.dump(seen, f)
+    json.dump({
+        "topics": seen_topics,
+        "urls": list(seen_urls)
+    }, f)
