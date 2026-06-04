@@ -6,7 +6,7 @@ from datetime import datetime
 import os
 from urllib.parse import urlparse
 
-WEBHOOK_URL = https://discord.com/api/webhooks/1512008622610317454/cO80pEoNrgP3Ak0hXnqiAUqdRyi3j3mps5HPOwrB6gmGsczaUbg79GBf3c1bdXsKuABK
+WEBHOOK_URL = "https://discord.com/api/webhooks/1512008622610317454/cO80pEoNrgP3Ak0hXnqiAUqdRyi3j3mps5HPOwrB6gmGsczaUbg79GBf3c1bdXsKuABK"
 
 RSS_URL = "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22%29+-football+-match+-sport&hl=fr&gl=FR&ceid=FR:fr"
 
