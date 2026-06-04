@@ -1,0 +1,25 @@
+name: Veille Châlons
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"  # toutes les 2 heures
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Installer Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Installer dépendances
+        run: pip install -r requirements.txt
+
+      - name: Lancer script
+        run: python script.py
