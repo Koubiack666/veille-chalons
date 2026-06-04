@@ -36,12 +36,17 @@ def extract_image(entry):
 
     return None
 
-# Domaine propre
-def get_domain(url):
-    try:
-        return urlparse(url).netloc.replace("www.", "")
-    except:
-        return "source"
+# Extraction vrai domaine depuis le titre
+def extract_real_source(entry):
+    title = entry.get("title", "")
+    parts = title.split(" - ")
+
+    for part in reversed(parts):
+        part = part.strip().lower()
+        if "." in part and len(part) < 40:
+            return part
+
+    return "source"
 
 # Envoi Discord
 def send_to_discord(title, articles, image_url):
@@ -50,14 +55,21 @@ def send_to_discord(title, articles, image_url):
     main = articles[0]
     main_link = main.get("link", "")
 
-    # 🔗 Sources = mot cliquable + domaine affiché
+    # ✅ éviter doublon de médias
+    seen_domains = set()
     source_lines = []
-    for art in articles[:10]:
-        link = art.get("link", "")
-        domain = get_domain(link)
 
-        # ✅ "Sources" cliquable
-        source_lines.append(f"• {link} {domain}")
+    for art in articles:
+        link = art.get("link", "")
+        domain = extract_real_source(art)
+
+        if domain not in seen_domains:
+            # ✅ "Sources" cliquable + domaine affiché
+            source_lines.append(f"• {link} {domain}")
+            seen_domains.add(domain)
+
+        if len(source_lines) >= 10:
+            break
 
     sources_display = "\n".join(source_lines)
 
@@ -95,7 +107,6 @@ def send_to_discord(title, articles, image_url):
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
-
 # Lecture RSS
 feed = feedparser.parse(RSS_URL)
 
@@ -125,7 +136,7 @@ for key, articles in clusters.items():
     else:
         old_nb = seen[key]
 
-        # ✅ republier seulement si évolution
+        # ✅ republie si le sujet prend de l'ampleur
         if nb > old_nb + 2:
             send_to_discord(
                 title="🔄 Mise à jour : " + main.get("title", ""),
