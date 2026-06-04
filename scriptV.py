@@ -5,7 +5,6 @@ import re
 from datetime import datetime
 import os
 import json
-from urllib.parse import urlparse
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
@@ -36,7 +35,7 @@ def extract_image(entry):
 
     return None
 
-# Extraction vrai domaine depuis le titre
+# Extraction du vrai nom de site depuis le titre
 def extract_real_source(entry):
     title = entry.get("title", "")
     parts = title.split(" - ")
@@ -48,24 +47,22 @@ def extract_real_source(entry):
 
     return "source"
 
-# Envoi Discord
+# Envoi Discord (VERSION PRO)
 def send_to_discord(title, articles, image_url):
 
     nb = len(articles)
     main = articles[0]
     main_link = main.get("link", "")
 
-    # ✅ éviter doublon de médias
+    # ✅ éviter doublons de médias
     seen_domains = set()
     source_lines = []
 
     for art in articles:
-        link = art.get("link", "")
         domain = extract_real_source(art)
 
         if domain not in seen_domains:
-            # ✅ "Sources" cliquable + domaine affiché
-            source_lines.append(f"• {link} {domain}")
+            source_lines.append(f"• {domain}")
             seen_domains.add(domain)
 
         if len(source_lines) >= 10:
@@ -92,7 +89,7 @@ def send_to_discord(title, articles, image_url):
         "fields": [
             {
                 "name": "📰 Sources",
-                "value": sources_display if sources_display else "Aucune source",
+                "value": f"🔗 {main_link}\n\n{sources_display}",
                 "inline": False
             }
         ],
@@ -136,7 +133,7 @@ for key, articles in clusters.items():
     else:
         old_nb = seen[key]
 
-        # ✅ republie si le sujet prend de l'ampleur
+        # republier si le sujet évolue
         if nb > old_nb + 2:
             send_to_discord(
                 title="🔄 Mise à jour : " + main.get("title", ""),
