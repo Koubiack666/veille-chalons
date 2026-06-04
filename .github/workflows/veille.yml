@@ -23,3 +23,5 @@ jobs:
 
       - name: Lancer script
         run: python scriptV.py
+        env:
+    WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
