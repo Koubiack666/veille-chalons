@@ -9,14 +9,11 @@ import urllib.parse
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# ✅ FLUX ULTRA CIBLÉ
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Ch%C3%A2lons+Agglo%22+OR+%22territoire+Ch%C3%A2lons+Agglo%22+OR+%22communaut%C3%A9+d%27agglom%C3%A9ration+de+Ch%C3%A2lons%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr"
 ]
 
 SEEN_FILE = "seen.json"
-
-# ✅ mots exclus (sécurité)
 EXCLUDED_KEYWORDS = ["reims", "troyes", "epernay"]
 
 # Charger historique
@@ -29,23 +26,20 @@ except:
 def clean_title(title):
     return re.sub(r'[^\w\s]', '', title.lower())
 
-# ✅ uniquement aujourd’hui
 def is_today(entry):
 
     if hasattr(entry, "published_parsed"):
-
-        article_date = datetime(*entry.published_parsed[:6])
-        today = datetime.now()
+        d = datetime(*entry.published_parsed[:6])
+        now = datetime.now()
 
         return (
-            article_date.year == today.year and
-            article_date.month == today.month and
-            article_date.day == today.day
+            d.year == now.year and
+            d.month == now.month and
+            d.day == now.day
         )
 
     return True
 
-# ✅ filtrage territoire
 def is_valid_article(entry):
 
     text = (
@@ -59,7 +53,6 @@ def is_valid_article(entry):
 
     return True
 
-# ✅ vraie url
 def get_real_url(entry):
 
     link = entry.get("link", "")
@@ -75,29 +68,22 @@ def get_real_url(entry):
 
     return link
 
-# ✅ source propre
 def extract_real_source(entry):
 
     title = entry.get("title", "")
     parts = title.split(" - ")
 
     for part in reversed(parts):
-        part = part.strip().lower()
-        if "." in part and len(part) < 40:
-            return part
+        if "." in part:
+            return part.strip().lower()
 
     link = get_real_url(entry)
-    if "://" in link:
-        return link.split("/")[2].replace("www.", "")
+    return link.split("/")[2].replace("www.", "")
 
-    return "source"
-
-# ✅ DISCORD
 def send_to_discord(title, articles):
 
     nb = len(articles)
     main = articles[0]
-
     main_link = get_real_url(main)
 
     seen_domains = set()
@@ -110,12 +96,8 @@ def send_to_discord(title, articles):
             sources.append(f"• {domain}")
             seen_domains.add(domain)
 
-        if len(sources) >= 10:
-            break
-
     sources_text = "\n".join(sources)
 
-    # importance
     if nb >= 10:
         niveau = "🔥 Sujet majeur"
         color = 15158332
@@ -132,26 +114,18 @@ def send_to_discord(title, articles):
         "description": f"{niveau}\n\n🧠 **{nb} articles** sur ce sujet",
         "color": color,
         "fields": [
-            {
-                "name": "🔗 Article principal",
-                "value": main_link,
-                "inline": False
-            },
-            {
-                "name": "📰 Sources",
-                "value": sources_text if sources_text else "Aucune source",
-                "inline": False
-            }
+            {"name": "🔗 Article principal", "value": main_link, "inline": False},
+            {"name": "📰 Sources", "value": sources_text, "inline": False}
         ],
         "footer": {
-            "text": f"Veille Châlons • {datetime.now().strftime('%d/%m %H:%M')}"
+            "text": f"Veille OK • {datetime.now().strftime('%d/%m %H:%M')}"
         }
     }
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
 
-# ✅ AGRÉGATION
+# --- EXÉCUTION ---
 clusters = defaultdict(list)
 
 for feed_url in RSS_FEEDS:
@@ -168,7 +142,7 @@ for feed_url in RSS_FEEDS:
         key = clean_title(entry.get("title", ""))[:80]
         clusters[key].append(entry)
 
-# ✅ TRAITEMENT
+
 sent_something = False
 
 for key, articles in clusters.items():
@@ -187,11 +161,12 @@ for key, articles in clusters.items():
             seen[key] = nb
             sent_something = True
 
-# ✅ fallback si rien
+
+# ✅ message si rien
 if not sent_something:
     requests.post(
         WEBHOOK_URL,
-        json={"content": "✅ Veille OK — Aucun nouvel article aujourd'hui"}
+        json={"content": f"✅ Veille OK — aucun nouvel article ({datetime.now().strftime('%H:%M')})"}
     )
 
 # ✅ sauvegarde
