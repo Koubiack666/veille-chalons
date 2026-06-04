@@ -8,7 +8,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_SOCIAL")
 
 RSS_FEEDS = [
     "https://nitter.net/chalonsagglo/rss",
-    "https://www.youtube.com/feeds/videos.xml?channel_id=UCXXXXXXXXXXXX"
+    "https://www.youtube.com/feeds/videos.xml?search_query=chalons+agglo+OR+chalons+champagne+OR+chalo"
 ]
 
 SEEN_FILE = "seen_social.json"
