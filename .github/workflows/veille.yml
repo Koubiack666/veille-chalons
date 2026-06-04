@@ -2,7 +2,7 @@ name: Veille Châlons
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -24,4 +24,4 @@ jobs:
       - name: Lancer script
         run: python scriptV.py
         env:
-    WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
