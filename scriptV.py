@@ -13,7 +13,7 @@ RSS_URL = "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%
 
 SEEN_FILE = "seen.json"
 
-# Charger l'historique
+# Charger historique
 try:
     with open(SEEN_FILE, "r") as f:
         seen = json.load(f)
@@ -39,8 +39,7 @@ def extract_image(entry):
 # Domaine propre
 def get_domain(url):
     try:
-        domain = urlparse(url).netloc.replace("www.", "")
-        return domain
+        return urlparse(url).netloc.replace("www.", "")
     except:
         return "source"
 
@@ -51,12 +50,14 @@ def send_to_discord(title, articles, image_url):
     main = articles[0]
     main_link = main.get("link", "")
 
-    # Sources propres cliquables
+    # 🔗 Sources = mot cliquable + domaine affiché
     source_lines = []
     for art in articles[:10]:
         link = art.get("link", "")
         domain = get_domain(link)
-        source_lines.append(f"• {link}")
+
+        # ✅ "Sources" cliquable
+        source_lines.append(f"• {link} {domain}")
 
     sources_display = "\n".join(source_lines)
 
@@ -88,6 +89,7 @@ def send_to_discord(title, articles, image_url):
         }
     }
 
+    # Image
     if image_url:
         embed["image"] = {"url": image_url}
 
@@ -112,7 +114,6 @@ for key, articles in clusters.items():
     main = articles[0]
     image_url = extract_image(main)
 
-    # Si jamais vu → publier
     if key not in seen:
         send_to_discord(
             title=main.get("title", "Sans titre"),
@@ -122,10 +123,10 @@ for key, articles in clusters.items():
         seen[key] = nb
 
     else:
-        # ✅ REPUBLICATION SI LE SUJET PREND DE L’IMPORTANCE
         old_nb = seen[key]
 
-        if nb > old_nb + 2:  # seuil d'évolution
+        # ✅ republier seulement si évolution
+        if nb > old_nb + 2:
             send_to_discord(
                 title="🔄 Mise à jour : " + main.get("title", ""),
                 articles=articles,
