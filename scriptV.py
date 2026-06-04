@@ -5,10 +5,11 @@ import re
 from datetime import datetime
 import os
 import json
+from bs4 import BeautifulSoup
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# ✅ MULTI FLUX
+# MULTI SOURCES
 RSS_FEEDS = [
     # GLOBAL
     "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22+OR+%22Ch%C3%A2lons+Agglo%22+OR+%22Communaut%C3%A9+d%27agglom%C3%A9ration+de+Ch%C3%A2lons%22+OR+%22Benoist+Apparu%22+OR+%22Jacques+Jesson%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
@@ -31,15 +32,37 @@ try:
 except:
     seen = {}
 
-# Nettoyage titre
+# Nettoyage titre (clustering)
 def clean_title(title):
     return re.sub(r'[^\w\s]', '', title.lower())
 
-# Image
+# EXTRACTION IMAGE (OPEN GRAPH + fallback)
 def extract_image(entry):
-    if "media_content" in entry:
-        return entry.media_content[0].get("url")
 
+    url = entry.get("link", "")
+
+    # ✅ 1. tenter Open Graph (meilleur résultat)
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=5)
+
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "html.parser")
+            tag = soup.find("meta", property="og:image")
+
+            if tag and tag.get("content"):
+                return tag["content"]
+    except:
+        pass
+
+    # ✅ 2. fallback RSS
+    if "media_content" in entry:
+        try:
+            return entry.media_content[0].get("url")
+        except:
+            pass
+
+    # ✅ 3. fallback summary
     if "summary" in entry:
         match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
         if match:
@@ -51,28 +74,26 @@ def extract_image(entry):
 def extract_real_source(entry):
     title = entry.get("title", "")
 
-    # cas Google News
     parts = title.split(" - ")
     for part in reversed(parts):
         part = part.strip().lower()
         if "." in part and len(part) < 40:
             return part
 
-    # fallback via link
     link = entry.get("link", "")
     if "://" in link:
         return link.split("/")[2].replace("www.", "")
 
     return "source"
 
-# Envoi Discord
+# ENVOI DISCORD
 def send_to_discord(title, articles, image_url):
 
     nb = len(articles)
     main = articles[0]
     main_link = main.get("link", "")
 
-    # ✅ évite doublon médias
+    # éviter doublon des médias
     seen_domains = set()
     source_lines = []
 
@@ -88,7 +109,7 @@ def send_to_discord(title, articles, image_url):
 
     sources_display = "\n".join(source_lines)
 
-    # Importance
+    # importance
     if nb >= 10:
         niveau = "🔥 Sujet majeur"
         color = 15158332
@@ -121,13 +142,13 @@ def send_to_discord(title, articles, image_url):
         }
     }
 
-    # Image
+    # ✅ ajout image
     if image_url:
         embed["image"] = {"url": image_url}
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
-# 🔎 AGRÉGATION MULTI-FLUX
+# AGRÉGATION
 clusters = defaultdict(list)
 
 for feed_url in RSS_FEEDS:
@@ -138,13 +159,14 @@ for feed_url in RSS_FEEDS:
         key = clean_title(title)[:80]
         clusters[key].append(entry)
 
-# Traitement intelligent
+# TRAITEMENT
 for key, articles in clusters.items():
 
     nb = len(articles)
     main = articles[0]
     image_url = extract_image(main)
 
+    # nouveau sujet
     if key not in seen:
         send_to_discord(
             title=main.get("title", "Sans titre"),
@@ -156,7 +178,7 @@ for key, articles in clusters.items():
     else:
         old_nb = seen[key]
 
-        # republie si évolution
+        # republie si le sujet grossit
         if nb > old_nb + 2:
             send_to_discord(
                 title="🔄 Mise à jour : " + main.get("title", ""),
@@ -165,6 +187,7 @@ for key, articles in clusters.items():
             )
             seen[key] = nb
 
-# Sauvegarde
+# sauvegarde
 with open(SEEN_FILE, "w") as f:
     json.dump(seen, f)
+``
