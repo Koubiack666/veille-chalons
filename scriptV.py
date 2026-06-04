@@ -184,4 +184,3 @@ for key, articles in clusters.items():
 # ✅ sauvegarde
 with open(SEEN_FILE, "w") as f:
     json.dump(seen, f)
-``
