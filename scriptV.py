@@ -4,8 +4,9 @@ from collections import defaultdict
 import re
 from datetime import datetime
 import os
+from urllib.parse import urlparse
 
-WEBHOOK_URL = "https://discord.com/api/webhooks/1512008622610317454/cO80pEoNrgP3Ak0hXnqiAUqdRyi3j3mps5HPOwrB6gmGsczaUbg79GBf3c1bdXsKuABK"
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 RSS_URL = "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22%29+-football+-match+-sport&hl=fr&gl=FR&ceid=FR:fr"
 
@@ -15,9 +16,11 @@ def clean_title(title):
 
 # Extraction image
 def extract_image(entry):
+    # image directe
     if "media_content" in entry:
         return entry.media_content[0].get("url")
 
+    # image dans HTML
     if "summary" in entry:
         match = re.search(r'<img[^>]+src="([^">]+)"', entry.summary)
         if match:
@@ -25,63 +28,70 @@ def extract_image(entry):
 
     return None
 
-# Récupération source
-def get_source(entry):
-    src = entry.get("source", {})
-    return src.get("title", "Source inconnue")
+# Extraction domaine (ex: lunion.fr)
+def get_domain(url):
+    try:
+        domain = urlparse(url).netloc
+        domain = domain.replace("www.", "")
+        return domain
+    except:
+        return "source"
 
-# Envoi Discord (format amélioré)
+# Envoi Discord
 def send_to_discord(title, articles, image_url):
 
     nb = len(articles)
+    main = articles[0]
+    main_link = main.get("link", "")
 
-    # Classement sources
-    sources = {}
-    for art in articles:
-        name = get_source(art)
-        sources[name] = sources.get(name, 0) + 1
-
-    sorted_sources = sorted(sources.items(), key=lambda x: x[1], reverse=True)
-
-    # 🔗 sources avec liens intégrés
-    source_links = []
+    # Construction liste des sources cliquables
+    source_lines = []
     for art in articles[:10]:
-        name = get_source(art)
         link = art.get("link", "")
-        source_links.append(f"• {link}")
+        domain = get_domain(link)
 
-    sources_display = "\n".join(source_links)
+        # format markdown discord
+        source_lines.append(f"• {link}")
 
-    # 📊 indicateur importance
+    sources_display = "\n".join(source_lines)
+
+    # Importance
     if nb >= 10:
         niveau = "🔥 Sujet majeur"
+        color = 15158332
     elif nb >= 5:
         niveau = "🟠 Sujet important"
+        color = 15844367
     else:
         niveau = "🟢 Sujet mineur"
+        color = 3066993
+
+    # IMAGE CLIQUABLE via lien du titre (et fallback dans description)
+    image_block = ""
+    if image_url:
+        image_block = f"{main_link}"
 
     embed = {
         "title": title,
-        "url": articles[0].get("link", ""),
-        "color": 15844367 if nb >= 5 else 3447003,
-        "author": {
-            "name": "Veille Châlons-en-Champagne"
-        },
-        "description": f"{niveau}\n\n🧠 **{nb} articles** sur ce sujet",
+        "url": main_link,
+        "description": f"{niveau}\n\n🧠 **{nb} articles** sur ce sujet\n{image_block}",
+        "color": color,
         "fields": [
             {
-                "name": "📰 Sources principales",
-                "value": sources_display[:1000] if sources_display else "Aucune source",
+                "name": "📰 Sources",
+                "value": sources_display if sources_display else "Aucune source",
                 "inline": False
             }
         ],
         "footer": {
-            "text": f"Mise à jour : {datetime.now().strftime('%d/%m %H:%M:%S')}"
+            "text": f"Veille Châlons • {datetime.now().strftime('%d/%m %H:%M')}"
         }
     }
 
     if image_url:
-        embed["image"] = {"url": image_url}
+        embed["image"] = {
+            "url": image_url
+        }
 
     if WEBHOOK_URL:
         requests.post(WEBHOOK_URL, json={"embeds": [embed]})
@@ -107,5 +117,4 @@ for key, articles in clusters.items():
         title=main.get("title", "Sans titre"),
         articles=articles,
         image_url=image_url
-        
     )
