@@ -108,5 +108,4 @@ for key, articles in clusters.items():
         articles=articles,
         image_url=image_url
         
-}
     )
