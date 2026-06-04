@@ -8,7 +8,19 @@ import json
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-RSS_URL = "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22+OR+%22Ch%C3%A2lons+Agglo%22+OR+%22Communaut%C3%A9+d%27agglom%C3%A9ration+de+Ch%C3%A2lons%22+OR+%22Benoist+Apparu%22+OR+%22Jacques+Jesson%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr"
+# ✅ MULTI FLUX
+RSS_FEEDS = [
+    # GLOBAL
+    "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22+OR+%22Ch%C3%A2lons+Agglo%22+OR+%22Communaut%C3%A9+d%27agglom%C3%A9ration+de+Ch%C3%A2lons%22+OR+%22Benoist+Apparu%22+OR+%22Jacques+Jesson%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
+
+    # ALERTES
+    "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Chalons+Champagne%22%29+%28accident+OR+violence+OR+plainte+OR+justice+OR+pol%C3%A9mique+OR+conflit%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
+
+    # PRESSE LOCALE
+    "https://www.lunion.fr/rss.xml",
+    "https://www.francebleu.fr/rss/champagne-ardenne",
+    "https://france3-regions.francetvinfo.fr/rss/champagne-ardenne.xml"
+]
 
 SEEN_FILE = "seen.json"
 
@@ -23,7 +35,7 @@ except:
 def clean_title(title):
     return re.sub(r'[^\w\s]', '', title.lower())
 
-# Extraction image
+# Image
 def extract_image(entry):
     if "media_content" in entry:
         return entry.media_content[0].get("url")
@@ -35,26 +47,32 @@ def extract_image(entry):
 
     return None
 
-# Extraction du vrai nom de site depuis le titre
+# Extraction domaine propre
 def extract_real_source(entry):
     title = entry.get("title", "")
-    parts = title.split(" - ")
 
+    # cas Google News
+    parts = title.split(" - ")
     for part in reversed(parts):
         part = part.strip().lower()
         if "." in part and len(part) < 40:
             return part
 
+    # fallback via link
+    link = entry.get("link", "")
+    if "://" in link:
+        return link.split("/")[2].replace("www.", "")
+
     return "source"
 
-# Envoi Discord (VERSION PRO)
+# Envoi Discord
 def send_to_discord(title, articles, image_url):
 
     nb = len(articles)
     main = articles[0]
     main_link = main.get("link", "")
 
-    # ✅ éviter doublons de médias
+    # ✅ évite doublon médias
     seen_domains = set()
     source_lines = []
 
@@ -88,8 +106,13 @@ def send_to_discord(title, articles, image_url):
         "color": color,
         "fields": [
             {
+                "name": "🔗 Article principal",
+                "value": main_link,
+                "inline": False
+            },
+            {
                 "name": "📰 Sources",
-                "value": f"🔗 {main_link}\n\n{sources_display}",
+                "value": sources_display if sources_display else "Aucune source",
                 "inline": False
             }
         ],
@@ -104,16 +127,16 @@ def send_to_discord(title, articles, image_url):
 
     requests.post(WEBHOOK_URL, json={"embeds": [embed]})
 
-# Lecture RSS
-feed = feedparser.parse(RSS_URL)
-
+# 🔎 AGRÉGATION MULTI-FLUX
 clusters = defaultdict(list)
 
-# Regroupement
-for entry in feed.entries:
-    title = entry.get("title", "")
-    key = clean_title(title)[:80]
-    clusters[key].append(entry)
+for feed_url in RSS_FEEDS:
+    feed = feedparser.parse(feed_url)
+
+    for entry in feed.entries:
+        title = entry.get("title", "")
+        key = clean_title(title)[:80]
+        clusters[key].append(entry)
 
 # Traitement intelligent
 for key, articles in clusters.items():
@@ -133,7 +156,7 @@ for key, articles in clusters.items():
     else:
         old_nb = seen[key]
 
-        # republier si le sujet évolue
+        # republie si évolution
         if nb > old_nb + 2:
             send_to_discord(
                 title="🔄 Mise à jour : " + main.get("title", ""),
