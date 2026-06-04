@@ -107,4 +107,7 @@ for key, articles in clusters.items():
         title=main.get("title", "Sans titre"),
         articles=articles,
         image_url=image_url
+        "footer": {
+    "text": f"Veille Châlons • {datetime.now().strftime('%d/%m %H:%M:%S')}"
+}
     )
