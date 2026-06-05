@@ -1,519 +1,481 @@
-"""
-🚀 VEILLE INTELLIGENTE MULTI-SOURCES
-Agrège RSS, Reddit, HackerNews, Twitter, YouTube et envoie sur Discord
-"""
-
 import feedparser
 import requests
-import json
-import urllib.parse
-import re
-import os
-from collections import defaultdict
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Dict, Tuple
+import os
+import json
 import logging
+from urllib.parse import quote, urlparse
+from bs4 import BeautifulSoup
+import re
 
-# ✅ CONFIGURATION
-logging.basicConfig(level=logging.INFO)
+# Configuration du logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
-REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID")
-REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET")
-TWITTER_BEARER_TOKEN = os.environ.get("TWITTER_BEARER_TOKEN")
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
+WEBHOOK_URL = os.environ.get("WEBHOOK_SOCIAL")
+SEEN_FILE = "seen_social.json"
 
-SEEN_FILE = "seen.json"
-KEYWORDS = [
+# Mots-clés de recherche
+SEARCH_KEYWORDS = [
     "Châlons-en-Champagne",
-    "Châlons Agglo",
-    "Marne",
-    "Champagne-Ardenne"
+    "Châlons-Agglo",
+    "chalons agglo",
+    "chalons-en-champagne",
+    "chalons champagne",
+    "@chalonsagglo"
+]
+
+# Sources RSS : feeds publiques et gratuites
+RSS_FEEDS = [
+    # X/Twitter via Nitter (instances publiques)
+    {
+        "url": "https://nitter.net/chalonsagglo/rss",
+        "source": "X / Twitter",
+        "type": "rss"
+    },
+    {
+        "url": "https://nitter.poast.org/chalonsagglo/rss",
+        "source": "X / Twitter (Mirror)",
+        "type": "rss"
+    },
+    # Mastodon instances publiques (Châlons, Champagne-Ardenne)
+    {
+        "url": "https://mastodon.online/@chalonsagglo/feed.rss",
+        "source": "Mastodon",
+        "type": "rss"
+    },
+    # Bluesky RSS (via feedproxy)
+    {
+        "url": "https://bsky.app/profile/chalonsagglo.bsky.social/feed/rss",
+        "source": "Bluesky",
+        "type": "rss"
+    },
+    # Instagram via Picuki (pas de RSS officiel, mais accessible)
+    # Note: Remplacer par le compte Instagram réel si disponible
+    # YouTube - Canal officiel Châlons-Agglo si disponible
+    {
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCH1L5Wz9P2d9_3XDkYpfMQQ",
+        "source": "YouTube",
+        "type": "rss"
+    },
+    # TikTok - via rss.inoreader.com (agrégateur public)
+    {
+        "url": "https://www.rss-engine.com/search/?q=chalonsagglo",
+        "source": "Réseaux Sociaux (Agrégé)",
+        "type": "rss"
+    },
+    # Google Actualités RSS
+    {
+        "url": f"https://news.google.com/rss/search?q={quote('Châlons-en-Champagne OR Châlons-Agglo')}&ceid=FR:fr",
+        "source": "Google Actualités",
+        "type": "rss",
+        "extract_real_source": True
+    },
+    # Bing Actualités RSS
+    {
+        "url": f"https://www.bing.com/news/search?q={quote('Châlons-en-Champagne Châlons-Agglo')}&format=rss",
+        "source": "Bing Actualités",
+        "type": "rss"
+    },
+    # Lemmy (Fédéverse)
+    {
+        "url": "https://lemmy.ml/feeds/r/france.rss",
+        "source": "Lemmy - France",
+        "type": "rss"
+    },
+    # Reddit (si la communauté Champagne-Ardenne existe)
+    {
+        "url": "https://www.reddit.com/r/france/search?q=chalons&sort=new&restrict_sr=on&limit=100",
+        "source": "Reddit",
+        "type": "rss"
+    },
+    # Wikipedia Actualités (actuellement Châlons)
+    {
+        "url": "https://en.m.wikipedia.org/w/api.php?action=query&list=recentchanges&rctitle=Châlons-en-Champagne&rcnamespace=0&format=json",
+        "source": "Wikipedia",
+        "type": "json"
+    },
+]
+
+IMPORTANT_KEYWORDS = [
+    "projet", "lancement", "inauguration",
+    "nouveau", "événement", "ouverture", "création",
+    "investissement", "développement", "infrastructure",
+    "transport", "école", "santé", "culture", "sport",
+    "initiative", "programme", "rénovation"
+]
+
+ALERT_KEYWORDS = [
+    "incident", "problème", "fermeture",
+    "alerte", "annulation", "urgence", "accident",
+    "crise", "situation d'urgence", "perturbation",
+    "grève", "blocage", "danger", "risque"
 ]
 
 EXCLUDED_KEYWORDS = [
-    "reims", "troyes", "epernay", "football", "match", "psg"
+    "jeu", "concours", "spam", "publicité",
+    "crypto", "bitcoin", "nft", "trading"
 ]
 
-# ✅ SOURCES RSS CLASSIQUES
-RSS_FEEDS = {
-    "google_news_territoire": "https://news.google.com/rss/search?q=%28%22Châlons-en-Champagne%22+OR+%22Châlons+Agglo%22%29&hl=fr&gl=FR",
-    "google_news_radio": "https://news.google.com/rss/search?q=%28chalons%29+%28radio+OR+%22France+Bleu%22%29&hl=fr",
-    "lunion": "https://www.lunion.fr/rss.xml",
-    "francebleu": "https://www.francebleu.fr/rss/champagne-ardenne",
-    "france3": "https://france3-regions.francetvinfo.fr/rss/champagne-ardenne.xml",
-    "francetvinfo": "https://www.francetvinfo.fr/titres.rss",
-    "gouvernement_marne": "https://www.marne.gouv.fr/spip.php?page=backend"
-}
+# Charger historique
+try:
+    with open(SEEN_FILE, "r") as f:
+        seen_urls = set(json.load(f))
+except FileNotFoundError:
+    seen_urls = set()
+    logger.info("Fichier seen_social.json créé")
 
-# ✅ SOURCES ALTERNATIVES
-ALTERNATIVE_SOURCES = {
-    "reddit": {
-        "enabled": REDDIT_CLIENT_ID is not None,
-        "subreddits": ["france", "Champagne", "ChampagneArdenne", "actualites"],
-        "keywords": KEYWORDS
-    },
-    "hackernews": {
-        "enabled": True,
-        "url": "https://news.ycombinator.com/api/v0/topstories.json",
-        "keywords": KEYWORDS
-    },
-    "twitter": {
-        "enabled": TWITTER_BEARER_TOKEN is not None,
-        "query": "Châlons OR Marne",
-        "keywords": KEYWORDS
-    },
-    "youtube": {
-        "enabled": YOUTUBE_API_KEY is not None,
-        "query": "Châlons-en-Champagne",
-        "keywords": KEYWORDS
-    }
-}
 
-# ✅ UTILITAIRES
-def now_paris():
-    return datetime.now(ZoneInfo('Europe/Paris'))
+def clean_text(text):
+    """Nettoie le texte"""
+    if not text:
+        return ""
+    return text.replace("\n", " ").strip()
 
-def clean_title(title: str) -> str:
-    """Normalise un titre pour clustering"""
-    text = re.sub(r'[^\w\s]', '', title.lower())
-    return ' '.join(text.split())[:100]
 
-def is_today(timestamp) -> bool:
-    """Vérifie si un article est d'aujourd'hui"""
-    if isinstance(timestamp, tuple):
-        d = datetime(*timestamp[:6])
-    elif isinstance(timestamp, datetime):
-        d = timestamp
-    else:
-        return True
-    
-    now = now_paris()
-    return d.date() == now.date()
+def contains_keywords(text, keywords):
+    """Vérifie si le texte contient les mots-clés"""
+    if not text:
+        return False
+    text_lower = text.lower()
+    return any(word.lower() in text_lower for word in keywords)
 
-def is_valid_article(title: str, summary: str = "") -> bool:
-    """Filtrage intelligent d'articles"""
-    text = (title + " " + summary).lower()
-    
-    # Exclusions
-    for word in EXCLUDED_KEYWORDS:
-        if word in text:
+
+def is_today(entry):
+    """Vérifie si l'entrée est d'aujourd'hui"""
+    if hasattr(entry, "published_parsed") and entry.published_parsed:
+        try:
+            d = datetime(*entry.published_parsed[:6])
+            now = datetime.now(ZoneInfo("Europe/Paris"))
+            
+            return (
+                d.year == now.year and
+                d.month == now.month and
+                d.day == now.day
+            )
+        except (TypeError, ValueError):
             return False
     
-    # Au moins un keyword pertinent
-    return any(kw.lower() in text for kw in KEYWORDS)
-
-def get_real_url(link: str) -> str:
-    """Extrait URL réelle depuis Google News"""
-    try:
-        parsed = urllib.parse.urlparse(link)
-        query = urllib.parse.parse_qs(parsed.query)
-        if "url" in query:
-            return query["url"][0]
-    except:
-        pass
-    return link
-
-def extract_source(entry: Dict) -> str:
-    """Extrait la source d'une entrée"""
-    title = entry.get("title", "")
-    parts = title.split(" - ")
-    
-    for part in reversed(parts):
-        part = part.strip().lower()
-        if "." in part:
-            return part
-    
-    link = entry.get("link", entry.get("url", ""))
-    if "://" in link:
-        return link.split("/")[2].replace("www.", "")
-    
-    return "inconnu"
-
-def load_seen_data() -> Tuple[Dict, set]:
-    """Charge les articles déjà vus"""
-    try:
-        with open(SEEN_FILE, "r") as f:
-            data = json.load(f)
-            return data.get("topics", {}), set(data.get("urls", []))
-    except:
-        return {}, set()
-
-def save_seen_data(topics: Dict, urls: set):
-    """Sauvegarde les articles vus"""
-    with open(SEEN_FILE, "w") as f:
-        json.dump({
-            "topics": topics,
-            "urls": list(urls),
-            "updated": now_paris().isoformat()
-        }, f, ensure_ascii=False, indent=2)
-
-
-# ✅ PARSERS MULTI-SOURCES
-
-class ArticleSource:
-    """Format unifié pour les articles"""
-    def __init__(self, title: str, url: str, summary: str = "", source: str = "", 
-                 published_at: datetime = None, image: str = None):
-        self.title = title
-        self.url = url
-        self.summary = summary
-        self.source = source
-        self.published_at = published_at or now_paris()
-        self.image = image
-
-    def to_dict(self):
-        return {
-            "title": self.title,
-            "url": self.url,
-            "summary": self.summary,
-            "source": self.source,
-            "published_at": self.published_at.isoformat(),
-            "image": self.image
-        }
-
-
-def parse_rss_feeds() -> List[ArticleSource]:
-    """Parse tous les flux RSS"""
-    articles = []
-    
-    for source_name, feed_url in RSS_FEEDS.items():
+    # Fallback : vérifier la clé 'updated'
+    if hasattr(entry, "updated_parsed") and entry.updated_parsed:
         try:
-            feed = feedparser.parse(feed_url)
-            logger.info(f"✅ RSS {source_name}: {len(feed.entries)} entries")
+            d = datetime(*entry.updated_parsed[:6])
+            now = datetime.now(ZoneInfo("Europe/Paris"))
             
-            for entry in feed.entries:
-                if not is_today(entry.get("published_parsed")):
-                    continue
-                
-                title = entry.get("title", "")
-                summary = entry.get("summary", "")
-                
-                if not is_valid_article(title, summary):
-                    continue
-                
-                real_url = get_real_url(entry.get("link", ""))
-                articles.append(ArticleSource(
-                    title=title,
-                    url=real_url,
-                    summary=summary[:200],
-                    source=extract_source(entry),
-                    published_at=datetime(*entry.published_parsed[:6]) if hasattr(entry, "published_parsed") else now_paris()
-                ))
-        except Exception as e:
-            logger.error(f"❌ Erreur RSS {source_name}: {e}")
+            return (
+                d.year == now.year and
+                d.month == now.month and
+                d.day == now.day
+            )
+        except (TypeError, ValueError):
+            return False
     
-    return articles
+    return False
 
 
-def parse_reddit() -> List[ArticleSource]:
-    """Parse Reddit via API officielle"""
-    if not ALTERNATIVE_SOURCES["reddit"]["enabled"]:
-        return []
+def is_relevant(text):
+    """Vérifie si le contenu est pertinent pour Châlons"""
+    if not text:
+        return False
+    text_lower = text.lower()
     
-    articles = []
+    # Vérifier si contient keywords de recherche
+    has_relevant_keywords = any(
+        keyword.lower() in text_lower for keyword in SEARCH_KEYWORDS
+    )
     
+    # Exclure si contient mots exclus
+    if contains_keywords(text, EXCLUDED_KEYWORDS):
+        return False
+    
+    return has_relevant_keywords
+
+
+def extract_source_from_title(title):
+    """Extrait la source depuis le titre (ex: 'Titre - Source')"""
+    if not title:
+        return None
+    
+    # Format typique : "Titre - Source-Name"
+    if " - " in title:
+        parts = title.rsplit(" - ", 1)
+        source_part = parts[-1].strip()
+        
+        # Vérifier que c'est une vrai source (pas du contenu)
+        if len(source_part) < 50 and len(source_part) > 2:
+            return source_part
+    
+    return None
+
+
+def extract_real_link_from_google_news(entry):
+    """Extrait le lien vrai article depuis Google News"""
     try:
-        auth = requests.auth.HTTPBasicAuth(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET)
-        headers = {"User-Agent": "Veille-Bot/1.0"}
+        # Google News fournit le vrai lien dans le contenu HTML
+        if hasattr(entry, "content") and entry.content:
+            soup = BeautifulSoup(entry.content[0].value, "html.parser")
+            link_tag = soup.find("a")
+            if link_tag and link_tag.get("href"):
+                return link_tag.get("href")
         
-        data = {
-            "grant_type": "password",
-            "username": os.environ.get("REDDIT_USERNAME"),
-            "password": os.environ.get("REDDIT_PASSWORD")
-        }
+        # Fallback : chercher dans le summary
+        if hasattr(entry, "summary") and entry.summary:
+            soup = BeautifulSoup(entry.summary, "html.parser")
+            link_tag = soup.find("a")
+            if link_tag and link_tag.get("href"):
+                return link_tag.get("href")
         
-        r = requests.post("https://www.reddit.com/api/v1/access_token", auth=auth, data=data, headers=headers)
-        token = r.json()["access_token"]
-        headers["Authorization"] = f"bearer {token}"
+        return entry.get("link")
         
-        for subreddit in ALTERNATIVE_SOURCES["reddit"]["subreddits"]:
-            url = f"https://oauth.reddit.com/r/{subreddit}/hot"
-            response = requests.get(url, headers=headers, params={"limit": 50})
-            
-            for post in response.json()["data"]["children"]:
-                data = post["data"]
-                title = data["title"]
-                
-                if not is_valid_article(title):
-                    continue
-                
-                articles.append(ArticleSource(
-                    title=title,
-                    url=f"https://reddit.com{data['permalink']}",
-                    summary=data.get("selftext", "")[:200],
-                    source=f"r/{subreddit}",
-                    image=data.get("thumbnail")
-                ))
-        
-        logger.info(f"✅ Reddit: {len(articles)} articles")
     except Exception as e:
-        logger.error(f"❌ Erreur Reddit: {e}")
-    
-    return articles
+        logger.debug(f"Erreur extraction lien Google News : {e}")
+        return entry.get("link")
 
 
-def parse_hackernews() -> List[ArticleSource]:
-    """Parse HackerNews (articles tech/startups locaux)"""
-    articles = []
+def extract_image_url(entry, original_link):
+    """Extrait l'URL de l'image de l'article original, pas de Google/Bing"""
+    image_url = None
     
     try:
-        response = requests.get(ALTERNATIVE_SOURCES["hackernews"]["url"])
-        story_ids = response.json()[:30]
+        # 1. Chercher dans les médias de l'entrée RSS
+        if hasattr(entry, "media_content"):
+            for media in entry.media_content:
+                if media.get("medium") == "image":
+                    url = media.get("url")
+                    # Vérifier que ce n'est pas une image de Google/Bing
+                    if not any(domain in url.lower() for domain in ["google", "gstatic", "bing", "msn"]):
+                        return url
         
-        for story_id in story_ids:
-            item_url = f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json"
-            item = requests.get(item_url).json()
-            
-            title = item.get("title", "")
-            if not is_valid_article(title):
-                continue
-            
-            articles.append(ArticleSource(
-                title=title,
-                url=item.get("url", f"https://news.ycombinator.com/item?id={story_id}"),
-                summary="",
-                source="HackerNews"
-            ))
+        # 2. Chercher dans les liens media_thumbnail
+        if hasattr(entry, "media_thumbnail"):
+            for thumb in entry.media_thumbnail:
+                if "url" in thumb:
+                    url = thumb.get("url")
+                    if not any(domain in url.lower() for domain in ["google", "gstatic", "bing", "msn"]):
+                        image_url = url
+                        break
         
-        logger.info(f"✅ HackerNews: {len(articles)} articles")
+        # 3. Chercher dans les tags image du summary
+        if hasattr(entry, "summary") and entry.summary:
+            soup = BeautifulSoup(entry.summary, "html.parser")
+            img_tag = soup.find("img")
+            if img_tag and img_tag.get("src"):
+                candidate_url = img_tag.get("src")
+                # Vérifier que ce n'est pas une image de Google/Bing
+                if not any(domain in candidate_url.lower() for domain in ["google", "gstatic", "bing", "msn"]):
+                    image_url = candidate_url
+        
+        # 4. Essayer de scraper l'article original si on a le lien
+        if not image_url and original_link:
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+                response = requests.get(original_link, timeout=5, headers=headers)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, "html.parser")
+                    
+                    # Chercher open graph image
+                    og_image = soup.find("meta", property="og:image")
+                    if og_image and og_image.get("content"):
+                        return og_image.get("content")
+                    
+                    # Chercher twitter:image
+                    twitter_image = soup.find("meta", attrs={"name": "twitter:image"})
+                    if twitter_image and twitter_image.get("content"):
+                        return twitter_image.get("content")
+                    
+                    # Chercher la première image pertinente
+                    img_tag = soup.find("img", attrs={"alt": re.compile(".*", re.I)})
+                    if img_tag and img_tag.get("src"):
+                        img_src = img_tag.get("src")
+                        # Convertir URL relative en absolute
+                        if img_src.startswith("http"):
+                            return img_src
+                        elif img_src.startswith("/"):
+                            from urllib.parse import urljoin
+                            return urljoin(original_link, img_src)
+            except Exception as e:
+                logger.debug(f"Erreur lors du scraping d'image : {e}")
+        
+        return image_url
+        
     except Exception as e:
-        logger.error(f"❌ Erreur HackerNews: {e}")
-    
-    return articles
+        logger.debug(f"Erreur extraction image : {e}")
+        return None
 
 
-def parse_twitter() -> List[ArticleSource]:
-    """Parse Twitter via API v2"""
-    if not ALTERNATIVE_SOURCES["twitter"]["enabled"]:
-        return []
-    
-    articles = []
+def send_to_discord(title, link, source, description="", image_url=""):
+    """Envoie une notification Discord avec image et vraie source"""
+    if not WEBHOOK_URL:
+        logger.error("WEBHOOK_URL non configurée")
+        return False
     
     try:
-        headers = {
-            "Authorization": f"Bearer {TWITTER_BEARER_TOKEN}",
-            "User-Agent": "Veille-Bot/1.0"
+        text = title.lower() if title else ""
+        
+        if contains_keywords(text, ALERT_KEYWORDS):
+            tag = "🚨 ALERTE"
+            color = 15158332  # Rouge
+        elif contains_keywords(text, IMPORTANT_KEYWORDS):
+            tag = "⭐ IMPORTANT"
+            color = 15844367  # Orange
+        else:
+            tag = "📢 INFORMATION"
+            color = 3447003   # Bleu
+        
+        now_paris = datetime.now(ZoneInfo("Europe/Paris"))
+        
+        desc = f"{tag}\n📱 Source : {source}"
+        if description:
+            desc += f"\n\n{description[:200]}"  # Limiter à 200 chars
+        
+        embed = {
+            "title": title[:256] if title else "Sans titre",
+            "url": link if link else None,
+            "description": desc,
+            "color": color,
+            "footer": {
+                "text": f"Veille Réseaux • {now_paris.strftime('%d/%m %H:%M')}"
+            }
         }
         
-        params = {
-            "query": ALTERNATIVE_SOURCES["twitter"]["query"],
-            "max_results": 100,
-            "tweet.fields": "created_at,public_metrics",
-            "expansions": "author_id,attachments.media_keys",
-            "media.fields": "preview_image_url",
-            "user.fields": "username"
-        }
+        # Ajouter l'image si trouvée
+        if image_url:
+            embed["image"] = {
+                "url": image_url
+            }
+            logger.info(f"📸 Image détectée : {image_url[:80]}")
         
-        response = requests.get(
-            "https://api.twitter.com/2/tweets/search/recent",
-            headers=headers,
-            params=params
+        response = requests.post(
+            WEBHOOK_URL,
+            json={"embeds": [embed]},
+            timeout=5
         )
         
-        if response.status_code == 200:
-            data = response.json()
-            for tweet in data.get("data", []):
-                articles.append(ArticleSource(
-                    title=tweet["text"][:200],
-                    url=f"https://twitter.com/i/web/status/{tweet['id']}",
-                    summary=tweet["text"],
-                    source="Twitter"
-                ))
-            logger.info(f"✅ Twitter: {len(articles)} tweets")
+        if response.status_code == 204:
+            logger.info(f"✅ Post envoyé : {title[:50]}")
+            return True
         else:
-            logger.warning(f"⚠️ Twitter API: {response.status_code}")
-    except Exception as e:
-        logger.error(f"❌ Erreur Twitter: {e}")
-    
-    return articles
-
-
-def parse_youtube() -> List[ArticleSource]:
-    """Parse YouTube Videos"""
-    if not ALTERNATIVE_SOURCES["youtube"]["enabled"]:
-        return []
-    
-    articles = []
-    
-    try:
-        params = {
-            "key": YOUTUBE_API_KEY,
-            "q": ALTERNATIVE_SOURCES["youtube"]["query"],
-            "part": "snippet",
-            "type": "video",
-            "maxResults": 50,
-            "order": "date",
-            "relevanceLanguage": "fr"
-        }
-        
-        response = requests.get("https://www.googleapis.com/youtube/v3/search", params=params)
-        
-        for item in response.json().get("items", []):
-            snippet = item["snippet"]
-            video_id = item["id"].get("videoId")
+            logger.error(f"Erreur Discord : {response.status_code}")
+            return False
             
-            articles.append(ArticleSource(
-                title=snippet["title"],
-                url=f"https://www.youtube.com/watch?v={video_id}",
-                summary=snippet["description"][:200],
-                source="YouTube",
-                image=snippet["thumbnails"]["medium"]["url"]
-            ))
-        
-        logger.info(f"✅ YouTube: {len(articles)} vidéos")
     except Exception as e:
-        logger.error(f"❌ Erreur YouTube: {e}")
-    
-    return articles
+        logger.error(f"Erreur lors de l'envoi Discord : {e}")
+        return False
 
 
-# ✅ AGRÉGATION & CLUSTERING
-
-def aggregate_articles(articles: List[ArticleSource], seen_urls: set) -> Dict[str, List[ArticleSource]]:
-    """Agrège les articles par sujet (clustering)"""
-    clusters = defaultdict(list)
-    
-    for article in articles:
-        if article.url in seen_urls:
-            continue
-        
-        # Clustering par titre normalisé
-        key = clean_title(article.title)
-        clusters[key].append(article)
-    
-    return clusters
-
-
-# ✅ DISCORD
-
-def get_color_by_importance(count: int) -> int:
-    """Détermine la couleur selon l'importance"""
-    if count >= 15:
-        return 16711680  # 🔴 Rouge
-    elif count >= 10:
-        return 16776960  # 🟡 Jaune
-    elif count >= 5:
-        return 16744448  # 🟠 Orange
-    else:
-        return 3066993   # 🟢 Vert
-
-def get_importance_label(count: int) -> str:
-    """Label d'importance"""
-    if count >= 15:
-        return "🔴 CRITIQUE"
-    elif count >= 10:
-        return "🔥 Majeur"
-    elif count >= 5:
-        return "🟠 Important"
-    else:
-        return "🟢 Mineur"
-
-def send_to_discord(title: str, articles: List[ArticleSource], update: bool = False):
-    """Envoie un embed Discord"""
-    if not WEBHOOK_URL:
-        logger.warning("⚠️ WEBHOOK_URL non défini")
-        return
-    
-    count = len(articles)
-    importance = get_importance_label(count)
-    color = get_color_by_importance(count)
-    
-    # Collecte les sources uniques
-    sources_set = set()
-    for article in articles[:10]:
-        sources_set.add(article.source)
-    sources_text = "\n".join([f"• {src}" for src in sorted(sources_set)])
-    
-    # Collecte les URLs
-    urls_text = "\n".join([f"[{art.source}]({art.url})" for art in articles[:5]])
-    
-    embed = {
-        "title": ("🔄 MAJ: " if update else "") + title[:256],
-        "url": articles[0].url,
-        "description": f"{importance}\n\n📊 **{count} articles** • {', '.join(set(art.source for art in articles))}",
-        "color": color,
-        "fields": [
-            {
-                "name": "🔗 Sources principales",
-                "value": sources_text or "Aucune source",
-                "inline": False
-            },
-            {
-                "name": "📰 Premiers articles",
-                "value": urls_text or "Aucun lien",
-                "inline": False
-            }
-        ],
-        "thumbnail": {
-            "url": articles[0].image if articles[0].image else None
-        } if articles[0].image else {},
-        "footer": {
-            "text": f"Veille • {now_paris().strftime('%d/%m %H:%M')}"
-        }
-    }
-    
+def process_rss_feed(feed_url, source, feed_config):
+    """Traite un flux RSS"""
+    sent_count = 0
     try:
-        requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
-        logger.info(f"✅ Discord: '{title[:50]}' envoyé")
+        logger.info(f"Traitement du flux : {source}")
+        feed = feedparser.parse(feed_url)
+        
+        if feed.bozo:
+            logger.warning(f"⚠️ Flux mal formé ({source}): {feed.bozo_exception}")
+        
+        for entry in feed.entries[:20]:  # Limiter à 20 entrées par flux
+            try:
+                title = clean_text(entry.get("title", ""))
+                link = entry.get("link", "")
+                description = clean_text(entry.get("summary", ""))
+                
+                # Si c'est Google Actualités, extraire le vrai lien et source
+                actual_source = source
+                if feed_config.get("extract_real_source"):
+                    link = extract_real_link_from_google_news(entry)
+                    # Extraire la source depuis le titre
+                    extracted_source = extract_source_from_title(title)
+                    if extracted_source:
+                        actual_source = extracted_source
+                        logger.info(f"🔗 Source extraite du titre : {actual_source}")
+                
+                # Vérifications
+                if not link or link in seen_urls:
+                    continue
+                
+                if not is_today(entry):
+                    continue
+                
+                if not is_relevant(f"{title} {description}"):
+                    continue
+                
+                # Extraire l'image de l'article original
+                image_url = extract_image_url(entry, link)
+                
+                # Envoyer vers Discord
+                if send_to_discord(title, link, actual_source, description, image_url):
+                    seen_urls.add(link)
+                    sent_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Erreur traitement entrée : {e}")
+                continue
+        
+        return sent_count
+        
     except Exception as e:
-        logger.error(f"❌ Erreur Discord: {e}")
+        logger.error(f"Erreur traitement flux {source} : {e}")
+        return 0
 
-
-# ✅ MAIN
 
 def main():
-    logger.info("🚀 Démarrage de la veille...")
+    """Fonction principale"""
+    logger.info("=" * 60)
+    logger.info("🔍 Démarrage de la veille réseaux sociaux")
+    logger.info(f"⏰ {datetime.now(ZoneInfo('Europe/Paris')).strftime('%d/%m/%Y %H:%M:%S')}")
+    logger.info("=" * 60)
     
-    seen_topics, seen_urls = load_seen_data()
+    total_sent = 0
+    successful_feeds = 0
     
-    # Agrège toutes les sources
-    all_articles = []
-    all_articles.extend(parse_rss_feeds())
-    all_articles.extend(parse_reddit())
-    all_articles.extend(parse_hackernews())
-    all_articles.extend(parse_twitter())
-    all_articles.extend(parse_youtube())
+    for feed_config in RSS_FEEDS:
+        try:
+            feed_url = feed_config["url"]
+            source = feed_config["source"]
+            
+            sent = process_rss_feed(feed_url, source, feed_config)
+            total_sent += sent
+            
+            if sent > 0:
+                successful_feeds += 1
+                
+        except Exception as e:
+            logger.error(f"Erreur critique sur {feed_config['source']} : {e}")
+            continue
     
-    logger.info(f"📊 Total: {len(all_articles)} articles collectés")
+    # Résumé
+    logger.info("=" * 60)
+    logger.info(f"📊 Résumé : {total_sent} posts envoyés sur {len(RSS_FEEDS)} sources")
+    logger.info("=" * 60)
     
-    # Clustering
-    clusters = aggregate_articles(all_articles, seen_urls)
-    logger.info(f"🧩 {len(clusters)} clusters trouvés")
+    # Message de statut si rien n'a été envoyé
+    if total_sent == 0 and WEBHOOK_URL:
+        try:
+            now_paris = datetime.now(ZoneInfo("Europe/Paris"))
+            requests.post(
+                WEBHOOK_URL,
+                json={
+                    "content": f"✅ Veille sociale OK — aucun nouveau post ({now_paris.strftime('%H:%M')})"
+                },
+                timeout=5
+            )
+            logger.info("✅ Message de statut envoyé")
+        except Exception as e:
+            logger.error(f"Erreur lors de l'envoi du message de statut : {e}")
     
-    sent_count = 0
-    
-    for key, articles in sorted(clusters.items(), key=lambda x: len(x[1]), reverse=True):
-        count = len(articles)
-        
-        if key not in seen_topics:
-            # Nouveau sujet
-            send_to_discord(articles[0].title, articles)
-            seen_topics[key] = count
-            for art in articles:
-                seen_urls.add(art.url)
-            sent_count += 1
-        
-        elif count > seen_topics[key] + 3:
-            # Évolution significative
-            send_to_discord(articles[0].title, articles, update=True)
-            seen_topics[key] = count
-            for art in articles:
-                seen_urls.add(art.url)
-            sent_count += 1
-    
-    # Fallback
-    if sent_count == 0:
-        requests.post(
-            WEBHOOK_URL,
-            json={"content": f"✅ Veille OK — {len(all_articles)} articles analysés, aucune nouveauté ({now_paris().strftime('%H:%M')})"},
-            timeout=10
-        )
-    
-    save_seen_data(seen_topics, seen_urls)
-    logger.info(f"✅ Veille terminée ({sent_count} notifications)")
+    # Sauvegarder l'historique
+    try:
+        with open(SEEN_FILE, "w") as f:
+            json.dump(list(seen_urls), f, indent=2)
+        logger.info(f"💾 Historique sauvegardé ({len(seen_urls)} URLs)")
+    except Exception as e:
+        logger.error(f"Erreur sauvegarde : {e}")
 
 
 if __name__ == "__main__":
