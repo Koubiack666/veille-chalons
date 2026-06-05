@@ -10,29 +10,36 @@ import urllib.parse
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# ✅ SOURCES RSS
+# ✅ SOURCES RSS (presse + radio)
 RSS_FEEDS = [
 
-    # Google News ciblé
+    # ✅ Google News territoire
     "https://news.google.com/rss/search?q=%28%22Ch%C3%A2lons-en-Champagne%22+OR+%22Ch%C3%A2lons+Agglo%22+OR+%22territoire+Ch%C3%A2lons+Agglo%22+OR+%22communaut%C3%A9+d%27agglom%C3%A9ration+de+Ch%C3%A2lons%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
 
-    # Presse locale
+    # ✅ Google News RADIO (signal faible 🔥)
+    "https://news.google.com/rss/search?q=%28chalons+OR+%22chalons+en+champagne%22%29+%28radio+OR+%22France+Bleu%22+OR+RCF+OR+%22Champagne+FM%22+OR+%22Radio+Mau-Nau%22%29+when%3A1d&hl=fr&gl=FR&ceid=FR:fr",
+
+    # ✅ Presse locale
     "https://www.lunion.fr/rss.xml",
     "https://www.francebleu.fr/rss/champagne-ardenne",
     "https://france3-regions.francetvinfo.fr/rss/champagne-ardenne.xml",
 
-    # Institutionnel
+    # ✅ Radio France / France Info
+    "https://www.francetvinfo.fr/titres.rss",
+
+    # ✅ Institutionnel
     "https://www.marne.gouv.fr/spip.php?page=backend"
 ]
 
 SEEN_FILE = "seen.json"
 
+# ✅ filtres
 EXCLUDED_KEYWORDS = [
     "reims", "troyes", "epernay",
     "football", "match", "psg"
 ]
 
-# ✅ Charger historique
+# ✅ charger historique
 try:
     with open(SEEN_FILE, "r") as f:
         data = json.load(f)
@@ -42,19 +49,18 @@ except:
     seen_topics = {}
     seen_urls = set()
 
-# ✅ Nettoyage titre
-def clean_title(title):
-    return re.sub(r'[^\w\s]', '', title.lower())
-
-# ✅ Heure Paris
+# ✅ heure de Paris
 def now_paris():
     return datetime.now(ZoneInfo('Europe/Paris'))
 
-# ✅ Filtre aujourd’hui
+# ✅ nettoyage titre
+def clean_title(title):
+    return re.sub(r'[^\w\s]', '', title.lower())
+
+# ✅ filtre aujourd’hui
 def is_today(entry):
 
     if hasattr(entry, "published_parsed"):
-
         d = datetime(*entry.published_parsed[:6])
         now = now_paris()
 
@@ -66,7 +72,7 @@ def is_today(entry):
 
     return True
 
-# ✅ Filtrage contenu
+# ✅ filtrage contenu
 def is_valid_article(entry):
 
     text = (
@@ -80,7 +86,7 @@ def is_valid_article(entry):
 
     return True
 
-# ✅ Vraie URL
+# ✅ vraie URL (Google News)
 def get_real_url(entry):
 
     link = entry.get("link", "")
@@ -96,7 +102,7 @@ def get_real_url(entry):
 
     return link
 
-# ✅ Source propre
+# ✅ source propre
 def extract_real_source(entry):
 
     title = entry.get("title", "")
@@ -108,12 +114,13 @@ def extract_real_source(entry):
             return part
 
     link = get_real_url(entry)
+
     if "://" in link:
         return link.split("/")[2].replace("www.", "")
 
     return "source"
 
-# ✅ Envoi Discord
+# ✅ envoi Discord
 def send_to_discord(title, articles):
 
     nb = len(articles)
@@ -124,6 +131,7 @@ def send_to_discord(title, articles):
     sources = []
 
     for art in articles:
+
         domain = extract_real_source(art)
 
         if domain not in seen_domains:
@@ -176,6 +184,7 @@ clusters = defaultdict(list)
 cluster_urls = defaultdict(set)
 
 for feed_url in RSS_FEEDS:
+
     feed = feedparser.parse(feed_url)
 
     for entry in feed.entries:
@@ -204,6 +213,7 @@ for key, articles in clusters.items():
     nb = len(articles)
     main = articles[0]
 
+    # ✅ nouveau sujet
     if key not in seen_topics:
         send_to_discord(main.get("title", ""), articles)
         seen_topics[key] = nb
@@ -211,13 +221,14 @@ for key, articles in clusters.items():
         sent_something = True
 
     else:
+        # ✅ évolution
         if nb > seen_topics[key] + 2:
             send_to_discord("🔄 Mise à jour : " + main.get("title", ""), articles)
             seen_topics[key] = nb
             seen_urls.update(cluster_urls[key])
             sent_something = True
 
-# ✅ fallback
+# ✅ fallback si rien
 if not sent_something:
     requests.post(
         WEBHOOK_URL,
