@@ -6,6 +6,8 @@ import os
 import json
 import logging
 from urllib.parse import quote
+from bs4 import BeautifulSoup
+import re
 
 # Configuration du logging
 logging.basicConfig(
@@ -192,8 +194,76 @@ def is_relevant(text):
     return has_relevant_keywords
 
 
-def send_to_discord(title, link, source, description=""):
-    """Envoie une notification Discord"""
+def extract_image_url(entry, original_link):
+    """Extrait l'URL de l'image de l'article original, pas de Google/Bing"""
+    image_url = None
+    
+    try:
+        # 1. Chercher dans les médias de l'entrée RSS
+        if hasattr(entry, "media_content"):
+            for media in entry.media_content:
+                if media.get("medium") == "image":
+                    return media.get("url")
+        
+        # 2. Chercher dans les liens media_thumbnail
+        if hasattr(entry, "media_thumbnail"):
+            for thumb in entry.media_thumbnail:
+                if "url" in thumb:
+                    image_url = thumb.get("url")
+                    break
+        
+        # 3. Chercher dans les tags image du summary
+        if hasattr(entry, "summary") and entry.summary:
+            soup = BeautifulSoup(entry.summary, "html.parser")
+            img_tag = soup.find("img")
+            if img_tag and img_tag.get("src"):
+                candidate_url = img_tag.get("src")
+                # Vérifier que ce n'est pas une image de Google/Bing
+                if not any(domain in candidate_url.lower() for domain in ["google", "gstatic", "bing", "msn"]):
+                    image_url = candidate_url
+        
+        # 4. Essayer de scraper l'article original si on a le lien
+        if not image_url and original_link:
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+                response = requests.get(original_link, timeout=5, headers=headers)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, "html.parser")
+                    
+                    # Chercher open graph image
+                    og_image = soup.find("meta", property="og:image")
+                    if og_image and og_image.get("content"):
+                        return og_image.get("content")
+                    
+                    # Chercher twitter:image
+                    twitter_image = soup.find("meta", attrs={"name": "twitter:image"})
+                    if twitter_image and twitter_image.get("content"):
+                        return twitter_image.get("content")
+                    
+                    # Chercher la première image pertinente
+                    img_tag = soup.find("img", attrs={"alt": re.compile(".*", re.I)})
+                    if img_tag and img_tag.get("src"):
+                        img_src = img_tag.get("src")
+                        # Convertir URL relative en absolute
+                        if img_src.startswith("http"):
+                            return img_src
+                        elif img_src.startswith("/"):
+                            from urllib.parse import urljoin
+                            return urljoin(original_link, img_src)
+            except Exception as e:
+                logger.debug(f"Erreur lors du scraping d'image : {e}")
+        
+        return image_url
+        
+    except Exception as e:
+        logger.debug(f"Erreur extraction image : {e}")
+        return None
+
+
+def send_to_discord(title, link, source, description="", image_url=""):
+    """Envoie une notification Discord avec image"""
     if not WEBHOOK_URL:
         logger.error("WEBHOOK_URL non configurée")
         return False
@@ -226,6 +296,13 @@ def send_to_discord(title, link, source, description=""):
                 "text": f"Veille Réseaux • {now_paris.strftime('%d/%m %H:%M')}"
             }
         }
+        
+        # Ajouter l'image si trouvée
+        if image_url:
+            embed["image"] = {
+                "url": image_url
+            }
+            logger.info(f"📸 Image détectée : {image_url[:80]}")
         
         response = requests.post(
             WEBHOOK_URL,
@@ -271,8 +348,11 @@ def process_rss_feed(feed_url, source):
                 if not is_relevant(f"{title} {description}"):
                     continue
                 
+                # Extraire l'image de l'article original
+                image_url = extract_image_url(entry, link)
+                
                 # Envoyer vers Discord
-                if send_to_discord(title, link, source, description):
+                if send_to_discord(title, link, source, description, image_url):
                     seen_urls.add(link)
                     sent_count += 1
                     
