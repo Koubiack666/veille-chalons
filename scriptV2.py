@@ -19,7 +19,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+WEBHOOK_CHALONS = os.environ.get("WEBHOOK_CHALONS")
 REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET")
 TWITTER_BEARER_TOKEN = os.environ.get("TWITTER_BEARER_TOKEN")
@@ -413,8 +413,8 @@ def get_importance_label(count: int) -> str:
 
 def send_to_discord(title: str, articles: List[ArticleSource], update: bool = False):
     """Envoie un embed Discord"""
-    if not WEBHOOK_URL:
-        logger.warning("⚠️ WEBHOOK_URL non défini")
+    if not WEBHOOK_CHALONS:
+        logger.warning("⚠️ WEBHOOK_CHALONS non défini")
         return
     
     count = len(articles)
@@ -456,7 +456,7 @@ def send_to_discord(title: str, articles: List[ArticleSource], update: bool = Fa
     }
     
     try:
-        requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
+        requests.post(WEBHOOK_CHALONS, json={"embeds": [embed]}, timeout=10)
         logger.info(f"✅ Discord: '{title[:50]}' envoyé")
     except Exception as e:
         logger.error(f"❌ Erreur Discord: {e}")
@@ -507,7 +507,7 @@ def main():
     # Fallback
     if sent_count == 0:
         requests.post(
-            WEBHOOK_URL,
+            WEBHOOK_CHALONS,
             json={"content": f"✅ Veille OK — {len(all_articles)} articles analysés, aucune nouveauté ({now_paris().strftime('%H:%M')})"},
             timeout=10
         )
