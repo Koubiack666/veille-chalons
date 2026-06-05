@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import os
 import json
 import logging
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from bs4 import BeautifulSoup
 import re
 
@@ -72,7 +72,8 @@ RSS_FEEDS = [
     {
         "url": f"https://news.google.com/rss/search?q={quote('Châlons-en-Champagne OR Châlons-Agglo')}&ceid=FR:fr",
         "source": "Google Actualités",
-        "type": "rss"
+        "type": "rss",
+        "extract_real_source": True
     },
     # Bing Actualités RSS
     {
@@ -194,6 +195,47 @@ def is_relevant(text):
     return has_relevant_keywords
 
 
+def extract_source_from_title(title):
+    """Extrait la source depuis le titre (ex: 'Titre - Source')"""
+    if not title:
+        return None
+    
+    # Format typique : "Titre - Source-Name"
+    if " - " in title:
+        parts = title.rsplit(" - ", 1)
+        source_part = parts[-1].strip()
+        
+        # Vérifier que c'est une vrai source (pas du contenu)
+        if len(source_part) < 50 and len(source_part) > 2:
+            return source_part
+    
+    return None
+
+
+def extract_real_link_from_google_news(entry):
+    """Extrait le lien vrai article depuis Google News"""
+    try:
+        # Google News fournit le vrai lien dans le contenu HTML
+        if hasattr(entry, "content") and entry.content:
+            soup = BeautifulSoup(entry.content[0].value, "html.parser")
+            link_tag = soup.find("a")
+            if link_tag and link_tag.get("href"):
+                return link_tag.get("href")
+        
+        # Fallback : chercher dans le summary
+        if hasattr(entry, "summary") and entry.summary:
+            soup = BeautifulSoup(entry.summary, "html.parser")
+            link_tag = soup.find("a")
+            if link_tag and link_tag.get("href"):
+                return link_tag.get("href")
+        
+        return entry.get("link")
+        
+    except Exception as e:
+        logger.debug(f"Erreur extraction lien Google News : {e}")
+        return entry.get("link")
+
+
 def extract_image_url(entry, original_link):
     """Extrait l'URL de l'image de l'article original, pas de Google/Bing"""
     image_url = None
@@ -203,14 +245,19 @@ def extract_image_url(entry, original_link):
         if hasattr(entry, "media_content"):
             for media in entry.media_content:
                 if media.get("medium") == "image":
-                    return media.get("url")
+                    url = media.get("url")
+                    # Vérifier que ce n'est pas une image de Google/Bing
+                    if not any(domain in url.lower() for domain in ["google", "gstatic", "bing", "msn"]):
+                        return url
         
         # 2. Chercher dans les liens media_thumbnail
         if hasattr(entry, "media_thumbnail"):
             for thumb in entry.media_thumbnail:
                 if "url" in thumb:
-                    image_url = thumb.get("url")
-                    break
+                    url = thumb.get("url")
+                    if not any(domain in url.lower() for domain in ["google", "gstatic", "bing", "msn"]):
+                        image_url = url
+                        break
         
         # 3. Chercher dans les tags image du summary
         if hasattr(entry, "summary") and entry.summary:
@@ -263,7 +310,7 @@ def extract_image_url(entry, original_link):
 
 
 def send_to_discord(title, link, source, description="", image_url=""):
-    """Envoie une notification Discord avec image"""
+    """Envoie une notification Discord avec image et vraie source"""
     if not WEBHOOK_URL:
         logger.error("WEBHOOK_URL non configurée")
         return False
@@ -322,7 +369,7 @@ def send_to_discord(title, link, source, description="", image_url=""):
         return False
 
 
-def process_rss_feed(feed_url, source):
+def process_rss_feed(feed_url, source, feed_config):
     """Traite un flux RSS"""
     sent_count = 0
     try:
@@ -338,6 +385,16 @@ def process_rss_feed(feed_url, source):
                 link = entry.get("link", "")
                 description = clean_text(entry.get("summary", ""))
                 
+                # Si c'est Google Actualités, extraire le vrai lien et source
+                actual_source = source
+                if feed_config.get("extract_real_source"):
+                    link = extract_real_link_from_google_news(entry)
+                    # Extraire la source depuis le titre
+                    extracted_source = extract_source_from_title(title)
+                    if extracted_source:
+                        actual_source = extracted_source
+                        logger.info(f"🔗 Source extraite du titre : {actual_source}")
+                
                 # Vérifications
                 if not link or link in seen_urls:
                     continue
@@ -352,7 +409,7 @@ def process_rss_feed(feed_url, source):
                 image_url = extract_image_url(entry, link)
                 
                 # Envoyer vers Discord
-                if send_to_discord(title, link, source, description, image_url):
+                if send_to_discord(title, link, actual_source, description, image_url):
                     seen_urls.add(link)
                     sent_count += 1
                     
@@ -382,7 +439,7 @@ def main():
             feed_url = feed_config["url"]
             source = feed_config["source"]
             
-            sent = process_rss_feed(feed_url, source)
+            sent = process_rss_feed(feed_url, source, feed_config)
             total_sent += sent
             
             if sent > 0:
