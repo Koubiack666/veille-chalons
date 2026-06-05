@@ -1,42 +1,51 @@
-name: Veille Reseaux
+name: Veille Sociale - 4x par jour
 
 on:
   schedule:
-    - cron: "0 4,7,10,17,21 * * *"
-  workflow_dispatch:
+    # Toutes les 6 heures = 4x par jour
+    # 06:00, 12:00, 18:00, 00:00 UTC
+    # = 07:00, 13:00, 19:00, 01:00 CET (heure de Paris)
+    - cron: '0 0,6,12,18 * * *'
   
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-
-permissions:
-  contents: write
+  # Permet de lancer manuellement
+  workflow_dispatch:
 
 jobs:
-  run-script:
+  veille-sociale:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout
+      - name: 📥 Cloner le repository
         uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      
+      - name: 🐍 Configurer Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install feedparser requests
-
-      - name: Run script
-        run: python script_social.py
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: 📦 Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install feedparser requests
+      
+      - name: 🔍 Exécuter la veille sociale
         env:
           WEBHOOK_SOCIAL: ${{ secrets.WEBHOOK_SOCIAL }}
-
-      - name: Commit seen_social.json
+        run: python script_social.py
+      
+      - name: 💾 Commiter les mises à jour du fichier seen_social.json
         run: |
-          git config user.name "bot"
-          git config user.email "bot@github.com"
+          git config user.name "Veille Bot"
+          git config user.email "bot@veille-chalons.local"
           git add seen_social.json
-          git commit -m "update social seen" || echo "No changes"
-          git push
+          if git diff-index --quiet HEAD --; then
+            echo "❌ Aucun changement à commiter"
+          else
+            git commit -m "🤖 Mise à jour veille sociale - $(date '+%d/%m/%Y %H:%M')"
+            git push
+          fi
+      
+      - name: ⚠️ Afficher les logs en cas d'erreur
+        if: failure()
+        run: echo "La veille a rencontré une erreur. Vérifier les logs ci-dessus."
