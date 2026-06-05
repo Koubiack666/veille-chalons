@@ -23,7 +23,7 @@ WEBHOOK_CHALONS = os.environ.get("WEBHOOK_CHALONS")
 REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET")
 TWITTER_BEARER_TOKEN = os.environ.get("TWITTER_BEARER_TOKEN")
-YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
+INVIDIOUS_INSTANCE = os.environ.get("INVIDIOUS_INSTANCE", "https://invidious.io")
 
 SEEN_FILE = "seen.json"
 KEYWORDS = [
@@ -48,6 +48,13 @@ RSS_FEEDS = {
     "gouvernement_marne": "https://www.marne.gouv.fr/spip.php?page=backend"
 }
 
+# ✅ CHAÎNES YOUTUBE À SURVEILLER (RSS)
+YOUTUBE_CHANNELS = {
+    "france_info": "UCpHMjvKLmhd1b2nRZL2j0Pw",  # Exemple: France Info
+    "france3_bourgogne": "UC1234567890abcdef",     # À adapter
+    "local_news": "UCxxxxxxxxxxxxxxxxxx"           # Ajoute tes propres chaînes
+}
+
 # ✅ SOURCES ALTERNATIVES
 ALTERNATIVE_SOURCES = {
     "reddit": {
@@ -65,9 +72,9 @@ ALTERNATIVE_SOURCES = {
         "query": "Châlons OR Marne",
         "keywords": KEYWORDS
     },
-    "youtube": {
-        "enabled": YOUTUBE_API_KEY is not None,
-        "query": "Châlons-en-Champagne",
+    "invidious": {
+        "enabled": True,
+        "instance": INVIDIOUS_INSTANCE,
         "keywords": KEYWORDS
     }
 }
@@ -208,6 +215,107 @@ def parse_rss_feeds() -> List[ArticleSource]:
     return articles
 
 
+def parse_youtube_rss() -> List[ArticleSource]:
+    """Parse les vidéos YouTube via RSS (API publique gratuite)"""
+    articles = []
+    
+    try:
+        for channel_name, channel_id in YOUTUBE_CHANNELS.items():
+            # Format RSS officiel YouTube (gratuit, pas d'API key)
+            feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+            
+            try:
+                feed = feedparser.parse(feed_url)
+                logger.info(f"✅ YouTube RSS {channel_name}: {len(feed.entries)} vidéos")
+                
+                for entry in feed.entries:
+                    if not is_today(entry.get("published_parsed")):
+                        continue
+                    
+                    title = entry.get("title", "")
+                    summary = entry.get("summary", "")
+                    
+                    if not is_valid_article(title, summary):
+                        continue
+                    
+                    # Format URL YouTube standard
+                    video_id = entry.get("id", "").split(":")[-1]
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
+                    
+                    # Extract thumbnail
+                    image = entry.get("media_thumbnail", [{}])[0].get("url") if entry.get("media_thumbnail") else None
+                    
+                    articles.append(ArticleSource(
+                        title=title,
+                        url=video_url,
+                        summary=summary[:200],
+                        source=f"YouTube - {channel_name}",
+                        published_at=datetime(*entry.published_parsed[:6]) if hasattr(entry, "published_parsed") else now_paris(),
+                        image=image
+                    ))
+            except Exception as e:
+                logger.error(f"❌ Erreur YouTube RSS {channel_name}: {e}")
+    
+    except Exception as e:
+        logger.error(f"❌ Erreur générale YouTube: {e}")
+    
+    return articles
+
+
+def parse_invidious() -> List[ArticleSource]:
+    """Parse Invidious API (alternative décentralisée YouTube, API publique)"""
+    articles = []
+    
+    if not ALTERNATIVE_SOURCES["invidious"]["enabled"]:
+        return []
+    
+    try:
+        instance = ALTERNATIVE_SOURCES["invidious"]["instance"]
+        
+        # Recherche sur Invidious (public, pas de clé)
+        for keyword in KEYWORDS:
+            try:
+                params = {
+                    "q": keyword,
+                    "type": "video",
+                    "sort_by": "upload_date",
+                    "duration": "long"
+                }
+                
+                response = requests.get(
+                    f"{instance}/api/v1/search",
+                    params=params,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    for video in response.json()[:15]:  # Limite à 15 résultats
+                        title = video.get("title", "")
+                        description = video.get("description", "")
+                        
+                        if not is_valid_article(title, description):
+                            continue
+                        
+                        video_id = video.get("videoId", "")
+                        
+                        articles.append(ArticleSource(
+                            title=title,
+                            url=f"https://www.youtube.com/watch?v={video_id}",
+                            summary=description[:200],
+                            source="Invidious",
+                            image=video.get("videoThumbnails", [{}])[0].get("url")
+                        ))
+                        
+                logger.info(f"✅ Invidious '{keyword}': {len(articles)} vidéos")
+            except Exception as e:
+                logger.error(f"❌ Erreur Invidious pour '{keyword}': {e}")
+    
+    except Exception as e:
+        logger.error(f"❌ Erreur générale Invidious: {e}")
+    
+    return articles
+
+
 def parse_reddit() -> List[ArticleSource]:
     """Parse Reddit via API officielle"""
     if not ALTERNATIVE_SOURCES["reddit"]["enabled"]:
@@ -331,45 +439,6 @@ def parse_twitter() -> List[ArticleSource]:
     return articles
 
 
-def parse_youtube() -> List[ArticleSource]:
-    """Parse YouTube Videos"""
-    if not ALTERNATIVE_SOURCES["youtube"]["enabled"]:
-        return []
-    
-    articles = []
-    
-    try:
-        params = {
-            "key": YOUTUBE_API_KEY,
-            "q": ALTERNATIVE_SOURCES["youtube"]["query"],
-            "part": "snippet",
-            "type": "video",
-            "maxResults": 50,
-            "order": "date",
-            "relevanceLanguage": "fr"
-        }
-        
-        response = requests.get("https://www.googleapis.com/youtube/v3/search", params=params)
-        
-        for item in response.json().get("items", []):
-            snippet = item["snippet"]
-            video_id = item["id"].get("videoId")
-            
-            articles.append(ArticleSource(
-                title=snippet["title"],
-                url=f"https://www.youtube.com/watch?v={video_id}",
-                summary=snippet["description"][:200],
-                source="YouTube",
-                image=snippet["thumbnails"]["medium"]["url"]
-            ))
-        
-        logger.info(f"✅ YouTube: {len(articles)} vidéos")
-    except Exception as e:
-        logger.error(f"❌ Erreur YouTube: {e}")
-    
-    return articles
-
-
 # ✅ AGRÉGATION & CLUSTERING
 
 def aggregate_articles(articles: List[ArticleSource], seen_urls: set) -> Dict[str, List[ArticleSource]]:
@@ -472,10 +541,11 @@ def main():
     # Agrège toutes les sources
     all_articles = []
     all_articles.extend(parse_rss_feeds())
+    all_articles.extend(parse_youtube_rss())      # YouTube RSS (API publique)
+    all_articles.extend(parse_invidious())         # Invidious (API publique)
     all_articles.extend(parse_reddit())
     all_articles.extend(parse_hackernews())
     all_articles.extend(parse_twitter())
-    all_articles.extend(parse_youtube())
     
     logger.info(f"📊 Total: {len(all_articles)} articles collectés")
     
