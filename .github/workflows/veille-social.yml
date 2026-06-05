@@ -1,10 +1,13 @@
-name: Veille Sociale - 4x par jour
+name: 📱 Veille Sociale - 4x par jour
 
 on:
   schedule:
-    # Toutes les 6 heures = 4x par jour
-    # 06:00, 12:00, 18:00, 00:00 UTC
-    # = 07:00, 13:00, 19:00, 01:00 CET (heure de Paris)
+    # Exécution toutes les 6 heures = 4x par jour
+    # Times en UTC :
+    # - 0:00 UTC  = 01:00 CET (minuit de Paris)
+    # - 6:00 UTC  = 07:00 CET (matin)
+    # - 12:00 UTC = 13:00 CET (après-midi)
+    # - 18:00 UTC = 19:00 CET (soir)
     - cron: '0 0,6,12,18 * * *'
   
   # Permet de lancer manuellement
@@ -13,39 +16,50 @@ on:
 jobs:
   veille-sociale:
     runs-on: ubuntu-latest
+    name: 🔍 Veille Réseaux Sociaux
     
     steps:
-      - name: 📥 Cloner le repository
+      - name: 📥 Récupérer le code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       
-      - name: 🐍 Configurer Python
+      - name: 🐍 Configuration Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: 📦 Installer les dépendances
+      - name: 📦 Installation des dépendances
         run: |
-    python -m pip install --upgrade pip setuptools wheel
-    pip install -r requirements.txt
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
       
-      - name: 🔍 Exécuter la veille sociale
+      - name: 🔍 Exécuter la veille
         env:
           WEBHOOK_SOCIAL: ${{ secrets.WEBHOOK_SOCIAL }}
-        run: python script_social.py
-      
-      - name: 💾 Commiter les mises à jour du fichier seen_social.json
         run: |
-          git config user.name "Veille Bot"
+          echo "📊 Lancement de la veille réseaux sociaux..."
+          python script_social.py
+          echo "✅ Veille terminée"
+      
+      - name: 💾 Sauvegarder l'historique
+        if: always()
+        run: |
+          git config user.name "🤖 Veille Bot"
           git config user.email "bot@veille-chalons.local"
-          git add seen_social.json
+          git add -A
+          
           if git diff-index --quiet HEAD --; then
-            echo "❌ Aucun changement à commiter"
+            echo "✅ Aucun changement à commiter"
           else
             git commit -m "🤖 Mise à jour veille sociale - $(date '+%d/%m/%Y %H:%M')"
             git push
+            echo "✅ Historique mis à jour"
           fi
       
-      - name: ⚠️ Afficher les logs en cas d'erreur
+      - name: 📧 Notification en cas d'erreur
         if: failure()
-        run: echo "La veille a rencontré une erreur. Vérifier les logs ci-dessus."
+        run: |
+          echo "❌ La veille a échoué"
+          exit 1
