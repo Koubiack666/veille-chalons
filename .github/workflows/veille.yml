@@ -1,49 +1,42 @@
-name: Veille Châlons
+
+name: Veille Chalons
 
 on:
   schedule:
-    - cron: "0 4,7,10,17,21 * * *"
+    - cron: "0 * * * *"   # toutes les heures
   workflow_dispatch:
-  
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: write
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Récupérer le dépôt
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Config Git
-        run: |
-          git config --global user.name "bot"
-          git config --global user.email "bot@example.com"
-
-      - name: Installer Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Installer dépendances
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install feedparser requests
 
-      # ✅ récupérer l’historique (anti-spam)
-      - name: Récupérer seen.json
-        run: |
-          git pull || echo "Pas encore d'historique"
-
-      # ✅ exécuter le script avec le secret
-      - name: Lancer script
+      - name: Run script
         run: python scriptV.py
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
 
-      # ✅ sauvegarder l’historique
-      - name: Sauvegarder seen.json
+      - name: Commit seen.json
         run: |
+          git config user.name "bot"
+          git config user.email "bot@github.com"
           git add seen.json
           git commit -m "update seen" || echo "No changes"
           git push
