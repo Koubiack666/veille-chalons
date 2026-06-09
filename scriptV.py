@@ -371,7 +371,7 @@ def main():
             requests.post(
                 WEBHOOK_URL,
                 json={
-                    "content": f"✅ Veille sociale OK — aucun nouveau post ({now_paris().strftime('%H:%M')})"
+                    "content": f"✅ Veille OK — aucun nouveau post ({now_paris().strftime('%H:%M')})"
                 },
                 timeout=5
             )
