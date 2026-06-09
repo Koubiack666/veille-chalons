@@ -16,7 +16,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_SOCIAL")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 SEEN_FILE = "seen_social.json"
 
 # ✅ Mots-clés de recherche
