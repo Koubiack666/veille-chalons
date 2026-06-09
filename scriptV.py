@@ -26,7 +26,11 @@ SEARCH_KEYWORDS = [
     "chalons agglo",
     "chalons-en-champagne",
     "chalons champagne",
-    "@chalonsagglo"
+    "@chalonsagglo",
+    "Benoist Apparu",
+    "Jacques Jesson",
+    "Jesson",
+    "Apparu"
 ]
 
 # ✅ Flux RSS sociaux
