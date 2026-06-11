@@ -1,492 +1,218 @@
 import feedparser
 import requests
+from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
 import json
-import logging
-from urllib.parse import quote
-
-# =========================================================
-# CONFIGURATION LOGS
-# =========================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-logger = logging.getLogger(__name__)
-
-# =========================================================
-# CONFIGURATION
-# =========================================================
+import re
 
 WEBHOOK_URL = os.environ.get("WEBHOOK_SOCIAL")
 SEEN_FILE = "seen_social.json"
 
-# =========================================================
-# MOTS-CLÉS DE VEILLE
-# =========================================================
+# ========================================================
+# REDDIT UNIQUEMENT
+# ========================================================
+
+RSS_FEEDS = [
+
+    "https://www.reddit.com/r/france/search.rss?q=chalons&sort=new",
+    "https://www.reddit.com/r/grandest/search.rss?q=chalons&sort=new"
+]
+
+# ========================================================
+# CATÉGORIES
+# ========================================================
+
+CATEGORIES = {
+
+    "🏘️ Communes Agglo": [
+        "aigny","aulnay-sur-marne","baconnes","bouy","bussy-lettrée",
+        "champigneul-champagne","cheniers","cherville","compertrix",
+        "condé-sur-marne","coolus","la neuville-au-temple",
+        "dommartin-lettrée","l'épine","lepine","fagnières",
+        "grandes-loges","haussimont","isse","jâlons","jalons",
+        "juvigny","lenharrée","livry-louvercy","matougues",
+        "moncetz-longevas","montépreux","montepreux",
+        "mourmelon-le-grand","mourmelon-le-petit",
+        "recy","saint-étienne-au-temple","saint-gibrien",
+        "saint-martin-sur-le-pré","saint-memmie",
+        "saint-pierre","sarry","sommesous",
+        "soudé","soude","soudron","thibie","vadenay",
+        "vassimont-et-chapelaine","vatry","la veuve",
+        "villers-le-château","vraux"
+    ],
+
+    "🎪 Arts du cirque / CNAC / PALC / Furies": [
+        "cirque", "cnac", "centre national des arts du cirque",
+        "palc", "pole national des arts du cirque",
+        "spectacle de rue", "theatre de rue",
+        "festival du cirque", "furies"
+    ],
+
+    "🚨 Sécurité": [
+        "accident", "incendie", "urgence", "police"
+    ],
+
+    "🏛️ Politique": [
+        "maire", "élu", "conseil", "municipales",
+        "apparu", "jesson"
+    ],
+
+    "🎉 Événement": [
+        "festival", "concert", "événement", "sport", "culture"
+    ],
+
+    "📊 Économie": [
+        "entreprise", "emploi", "investissement"
+    ]
+}
 
 SEARCH_KEYWORDS = [
-
-    # Territoire
-    "châlons-en-champagne",
-    "chalons-en-champagne",
-    "châlons agglo",
-    "chalons agglo",
-    "chalons champagne",
     "chalons",
-
-    # Comptes / élus
-    "@chalonsagglo",
-    "benoist apparu",
-    "jacques jesson",
+    "châlons",
+    "chalons en champagne",
+    "chalons agglo",
     "apparu",
     "jesson"
 ]
 
-# =========================================================
-# SOURCES 100% RÉSEAUX SOCIAUX
-# =========================================================
-
-RSS_FEEDS = [
-
-    # =========================================
-    # X / TWITTER
-    # =========================================
-
-    {
-        "url": "https://nitter.net/chalonsagglo/rss",
-        "source": "X / Twitter"
-    },
-
-    {
-        "url": "https://nitter.poast.org/chalonsagglo/rss",
-        "source": "X / Twitter Mirror"
-    },
-
-    # =========================================
-    # BLUESKY
-    # =========================================
-
-    {
-        "url": "https://bsky.app/profile/chalonsagglo.bsky.social/feed/rss",
-        "source": "Bluesky"
-    },
-
-    # =========================================
-    # MASTODON
-    # =========================================
-
-    {
-        "url": "https://mastodon.online/@chalonsagglo/feed.rss",
-        "source": "Mastodon"
-    },
-
-    # =========================================
-    # YOUTUBE
-    # =========================================
-
-    {
-        "url": "https://www.youtube.com/feeds/videos.xml?search_query=chalons+agglo+OR+chalons+champagne+OR+chalons",
-        "source": "YouTube"
-    },
-
-    # =========================================
-    # REDDIT
-    # =========================================
-
-    {
-        "url": "https://www.reddit.com/r/france/search.rss?q=chalons&sort=new",
-        "source": "Reddit"
-    },
-
-    # =========================================
-    # RÉSEAUX AGRÉGÉS
-    # =========================================
-
-    {
-        "url": "https://www.rss-engine.com/search/?q=chalonsagglo",
-        "source": "Agrégation Réseaux"
-    }
-]
-
-# =========================================================
-# PRIORITÉ CONTENU
-# =========================================================
-
-IMPORTANT_KEYWORDS = [
-    "projet",
-    "inauguration",
-    "événement",
-    "ouverture",
-    "nouveau",
-    "culture",
-    "transport",
-    "sport",
-    "développement",
-    "investissement",
-    "festival",
-    "concert"
-]
-
-ALERT_KEYWORDS = [
-    "incident",
-    "accident",
-    "alerte",
-    "urgence",
-    "danger",
-    "fermeture",
-    "annulation",
-    "crise",
-    "grève"
-]
-
 EXCLUDED_KEYWORDS = [
-    "crypto",
-    "bitcoin",
-    "nft",
-    "spam",
-    "publicité",
-    "trading",
-    "casino"
+    "crypto", "bitcoin", "nft", "trading"
 ]
 
-# =========================================================
-# CHARGEMENT HISTORIQUE
-# =========================================================
+# ========================================================
+# MÉMOIRE
+# ========================================================
 
 try:
-
     with open(SEEN_FILE, "r") as f:
         seen_urls = set(json.load(f))
-
-except FileNotFoundError:
-
+except:
     seen_urls = set()
 
-    logger.info("seen_social.json créé")
-
-# =========================================================
-# UTILITAIRES
-# =========================================================
+# ========================================================
+# UTILS
+# ========================================================
 
 def now_paris():
-
     return datetime.now(ZoneInfo("Europe/Paris"))
 
-
 def clean_text(text):
-
-    if not text:
-        return ""
-
-    return text.replace("\n", " ").strip()
-
+    return re.sub(r'\s+', ' ', text).strip() if text else ""
 
 def contains_keywords(text, keywords):
-
-    if not text:
-        return False
-
     text = text.lower()
-
-    return any(
-        keyword.lower() in text
-        for keyword in keywords
-    )
-
-
-# =========================================================
-# FILTRE DATE
-# =========================================================
-
-def is_today(entry):
-
-    now = now_paris()
-
-    # published
-    if hasattr(entry, "published_parsed") and entry.published_parsed:
-
-        try:
-
-            d = datetime(*entry.published_parsed[:6])
-
-            return (
-                d.year == now.year and
-                d.month == now.month and
-                d.day == now.day
-            )
-
-        except:
-            return False
-
-    # updated
-    if hasattr(entry, "updated_parsed") and entry.updated_parsed:
-
-        try:
-
-            d = datetime(*entry.updated_parsed[:6])
-
-            return (
-                d.year == now.year and
-                d.month == now.month and
-                d.day == now.day
-            )
-
-        except:
-            return False
-
-    return False
-
-# =========================================================
-# FILTRE PERTINENCE
-# =========================================================
+    return any(k in text for k in keywords)
 
 def is_relevant(text):
+    text = text.lower()
+    return contains_keywords(text, SEARCH_KEYWORDS) and not contains_keywords(text, EXCLUDED_KEYWORDS)
 
-    if not text:
-        return False
+def categorize(text):
 
     text = text.lower()
 
-    # mots exclus
-    if contains_keywords(text, EXCLUDED_KEYWORDS):
-        return False
+    for cat, keywords in CATEGORIES.items():
+        if any(k in text for k in keywords):
+            return cat
 
-    # mots pertinents
-    return any(
-        keyword in text
-        for keyword in SEARCH_KEYWORDS
-    )
+    return "📰 Autres"
 
-# =========================================================
-# ENVOI DISCORD
-# =========================================================
+# ========================================================
+# DISCORD
+# ========================================================
 
-def send_to_discord(title, link, source, description=""):
+def send_summary(total, category_count):
 
-    if not WEBHOOK_URL:
+    lines = []
 
-        logger.error("WEBHOOK_SOCIAL absent")
-        return False
+    for cat, count in sorted(category_count.items(), key=lambda x: -x[1]):
+        lines.append(f"{cat} : {count}")
 
-    try:
+    message = {
+        "content":
+        f"📱 **Rapport Réseaux (Reddit)**\n"
+        f"{total} publications détectées\n\n"
+        f"{chr(10).join(lines)}"
+    }
 
-        text = title.lower() if title else ""
+    requests.post(WEBHOOK_URL, json=message)
 
-        # =========================================
-        # PRIORITÉ
-        # =========================================
+def send_post(title, link, category):
 
-        if contains_keywords(text, ALERT_KEYWORDS):
-
-            tag = "🚨 ALERTE"
-            color = 15158332
-
-        elif contains_keywords(text, IMPORTANT_KEYWORDS):
-
-            tag = "⭐ IMPORTANT"
-            color = 15844367
-
-        else:
-
-            tag = "📢 INFORMATION"
-            color = 3447003
-
-        # =========================================
-        # DESCRIPTION
-        # =========================================
-
-        desc = f"{tag}\n📱 Source : {source}"
-
-        if description:
-
-            desc += f"\n\n{description[:250]}"
-
-        # =========================================
-        # EMBED DISCORD
-        # =========================================
-
-        embed = {
-            "title": title[:256] if title else "Sans titre",
-            "url": link,
-            "description": desc,
-            "color": color,
-            "footer": {
-                "text": f"Veille Réseaux • {now_paris().strftime('%d/%m %H:%M')}"
-            }
+    embed = {
+        "title": title,
+        "url": link,
+        "description": f"{category} Reddit",
+        "color": 15105570,
+        "footer": {
+            "text": f"Veille Reddit • {now_paris().strftime('%d/%m %H:%M')}"
         }
+    }
 
-        response = requests.post(
-            WEBHOOK_URL,
-            json={"embeds": [embed]},
-            timeout=5
+    requests.post(WEBHOOK_URL, json={"embeds": [embed]})
+
+# ========================================================
+# TRAITEMENT
+# ========================================================
+
+posts = []
+category_count = defaultdict(int)
+
+for feed_url in RSS_FEEDS:
+
+    feed = feedparser.parse(feed_url)
+
+    for entry in feed.entries:
+
+        link = entry.get("link", "")
+        title = clean_text(entry.get("title", ""))
+
+        if not link or link in seen_urls:
+            continue
+
+        if not is_relevant(title):
+            continue
+
+        category = categorize(title)
+
+        posts.append({
+            "title": title,
+            "link": link,
+            "category": category
+        })
+
+        category_count[category] += 1
+        seen_urls.add(link)
+
+# ========================================================
+# DISCORD
+# ========================================================
+
+if posts:
+
+    send_summary(len(posts), category_count)
+
+    for post in posts:
+        send_post(
+            post["title"],
+            post["link"],
+            post["category"]
         )
 
-        if response.status_code == 204:
+else:
 
-            logger.info(f"✅ Envoyé : {title[:60]}")
-            return True
+    requests.post(
+        WEBHOOK_URL,
+        json={
+            "content": f"✅ Veille Reddit réalisée à {now_paris().strftime('%Hh%M')} — aucun nouveau contenu"
+        }
+    )
 
-        logger.error(f"Erreur Discord : {response.status_code}")
+# ========================================================
+# SAUVEGARDE
+# ========================================================
 
-        return False
-
-    except Exception as e:
-
-        logger.error(f"Erreur Discord : {e}")
-        return False
-
-# =========================================================
-# TRAITEMENT RSS
-# =========================================================
-
-def process_rss_feed(feed_url, source):
-
-    sent_count = 0
-
-    try:
-
-        logger.info(f"🔍 Analyse : {source}")
-
-        feed = feedparser.parse(feed_url)
-
-        if feed.bozo:
-
-            logger.warning(f"⚠️ Flux mal formé : {source}")
-
-        for entry in feed.entries[:20]:
-
-            try:
-
-                title = clean_text(entry.get("title", ""))
-                description = clean_text(entry.get("summary", ""))
-                link = entry.get("link", "")
-
-                # anti doublon
-                if not link or link in seen_urls:
-                    continue
-
-                # uniquement aujourd'hui
-                if not is_today(entry):
-                    continue
-
-                # pertinence
-                if not is_relevant(f"{title} {description}"):
-                    continue
-
-                # Discord
-                if send_to_discord(
-                    title=title,
-                    link=link,
-                    source=source,
-                    description=description
-                ):
-
-                    seen_urls.add(link)
-                    sent_count += 1
-
-            except Exception as e:
-
-                logger.error(f"Erreur entrée : {e}")
-
-        return sent_count
-
-    except Exception as e:
-
-        logger.error(f"Erreur flux {source} : {e}")
-
-        return 0
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    logger.info("=" * 60)
-    logger.info("🚀 Démarrage veille réseaux sociaux")
-    logger.info(now_paris().strftime('%d/%m/%Y %H:%M:%S'))
-    logger.info("=" * 60)
-
-    total_sent = 0
-
-    # =========================================
-    # PARCOURS DES FLUX
-    # =========================================
-
-    for feed_config in RSS_FEEDS:
-
-        try:
-
-            count = process_rss_feed(
-                feed_config["url"],
-                feed_config["source"]
-            )
-
-            total_sent += count
-
-        except Exception as e:
-
-            logger.error(f"Erreur critique : {e}")
-
-    # =========================================
-    # RÉSUMÉ
-    # =========================================
-
-    logger.info("=" * 60)
-    logger.info(f"📊 {total_sent} publications détectées")
-    logger.info("=" * 60)
-
-    # =========================================
-    # FALLBACK
-    # =========================================
-
-    if total_sent == 0 and WEBHOOK_URL:
-
-        try:
-
-            requests.post(
-                WEBHOOK_URL,
-                json={
-                    "content": f"✅ Veille réalisée à {now_paris().strftime('%Hh%M')} — pas de nouveaux articles"
-                },
-                timeout=5
-            )
-
-            logger.info("✅ Message statut envoyé")
-
-        except Exception as e:
-
-            logger.error(f"Erreur fallback : {e}")
-
-    # =========================================
-    # SAUVEGARDE
-    # =========================================
-
-    try:
-
-        with open(SEEN_FILE, "w") as f:
-
-            json.dump(
-                list(seen_urls),
-                f,
-                indent=2
-            )
-
-        logger.info(f"💾 {len(seen_urls)} URLs sauvegardées")
-
-    except Exception as e:
-
-        logger.error(f"Erreur sauvegarde : {e}")
-
-# =========================================================
-# LANCEMENT
-# =========================================================
-
-if __name__ == "__main__":
-
-    main()
+with open(SEEN_FILE, "w") as f:
+    json.dump(list(seen_urls), f)
