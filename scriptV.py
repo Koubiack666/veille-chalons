@@ -60,7 +60,7 @@ CATEGORIES = {
 
     "🏛️ Politique": [
         "maire", "élu", "conseil", "municipales",
-        "apparu", "jesson"
+        "apparu", "jesson", "Bisiaux",
     ],
 
     "🎉 Événement": [
