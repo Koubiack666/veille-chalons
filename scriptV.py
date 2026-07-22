@@ -21,15 +21,26 @@ RSS_FEEDS = [
     "https://www.francebleu.fr/rss/champagne-ardenne",
     "https://france3-regions.francetvinfo.fr/rss/champagne-ardenne.xml",
     "https://www.francetvinfo.fr/titres.rss",
-    "https://www.marne.gouv.fr/spip.php?page=backend"
-    "https://www.lunion.fr/rss/115/cible_principale"
-    "https://www.lunion.fr/rss/157257/cible_principale"
-    "https://bm.chalonsenchampagne.fr/plui/actualites?format=feed&type=rs"
-    "https://news.google.com/rss/search?q=(CNAC OR PALC OR Furies OR "arts du cirque")"
-    "https://news.google.com/rss/search?q=("Châlons-en-Champagne")"
-    "https://news.google.com/rss/search?q=("Achille Bisiaux" OR "Bisiaux Achille")"
-    "https://news.google.com/rss/search?q=("Saint-Memmie" OR Fagnières OR Sarry OR Recy)"
-    
+    "https://www.marne.gouv.fr/spip.php?page=backend",
+
+    # L'Union local
+    "https://www.lunion.fr/rss/115/cible_principale",
+    "https://www.lunion.fr/rss/157257/cible_principale",
+
+    # PLUi Châlons Agglo
+    "https://bm.chalonsenchampagne.fr/plui/actualites?format=feed&type=rss",
+
+    # CNAC / PALC / Furies
+    "https://news.google.com/rss/search?q=%28CNAC+OR+PALC+OR+Furies+OR+%22arts+du+cirque%22%29&hl=fr&gl=FR&ceid=FR:fr",
+
+    # Châlons-en-Champagne
+    "https://news.google.com/rss/search?q=%22Ch%C3%A2lons-en-Champagne%22&hl=fr&gl=FR&ceid=FR:fr",
+
+    # Achille Bisiaux
+    "https://news.google.com/rss/search?q=%28%22Achille+Bisiaux%22+OR+%22Bisiaux+Achille%22%29&hl=fr&gl=FR&ceid=FR:fr",
+
+    # Communes de l'agglo
+    "https://news.google.com/rss/search?q=%28%22Saint-Memmie%22+OR+Fagni%C3%A8res+OR+Sarry+OR+Recy%29&hl=fr&gl=FR&ceid=FR:fr"
 ]
 
 # ========================================================
