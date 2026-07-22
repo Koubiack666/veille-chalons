@@ -111,11 +111,20 @@ EXCLUDED_KEYWORDS = [
 # MÉMOIRE
 # ========================================================
 
-try:
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
-        seen_urls = set(json.load(f))
-except Exception:
-    seen_urls = set()
+
+if seen_urls != initial_seen_urls:
+    with open(
+        SEEN_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+        json.dump(
+            sorted(seen_urls),
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
 
 # ========================================================
 # FONCTIONS
@@ -294,7 +303,7 @@ with open(
     encoding="utf-8"
 ) as f:
     json.dump(
-        list(seen_urls),
+        sorted(seen_urls),
         f,
         ensure_ascii=False,
         indent=2
