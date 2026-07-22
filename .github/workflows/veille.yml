@@ -38,5 +38,6 @@ jobs:
           git config user.name "Koubiack666"
           git config user.email "koubiack666@gmail.com"
           git add seen.json
-          git commit -m "update seen" || echo "No changes"
+          git diff --cached --quiet || git commit -m "update seen"
           git push
+
