@@ -35,8 +35,8 @@ jobs:
 
       - name: Commit seen.json
         run: |
-          git config user.name "bot"
-          git config user.email "bot@github.com"
+          git config user.name "Koubiack666"
+          git config user.email "koubiack666@gmail.com"
           git add seen.json
           git commit -m "update seen" || echo "No changes"
           git push
