@@ -27,7 +27,7 @@ RSS_FEEDS = [
     "https://bm.chalonsenchampagne.fr/plui/actualites?format=feed&type=rs"
     "https://news.google.com/rss/search?q=(CNAC OR PALC OR Furies OR "arts du cirque")"
     "https://news.google.com/rss/search?q=("Châlons-en-Champagne")"
-    "https://news.google.com/rss/search?q=("Achille Bisiaux" OR "Bisiaux Achille)"
+    "https://news.google.com/rss/search?q=("Achille Bisiaux" OR "Bisiaux Achille")"
     "https://news.google.com/rss/search?q=("Saint-Memmie" OR Fagnières OR Sarry OR Recy)"
     
 ]
