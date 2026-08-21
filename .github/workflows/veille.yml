@@ -1,10 +1,10 @@
 
 name: Veille Chalons
-
-on:
-  schedule:
-    - cron: "0 * * * *"   # toutes les heures
-  workflow_dispatch:
+#Enlever tous les # pour retirer le mode commentaire des lignes suivantes
+#on:
+#  schedule:
+ #   - cron: "0 * * * *"   # toutes les heures
+#  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
